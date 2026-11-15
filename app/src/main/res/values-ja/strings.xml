@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OpenTokenUsage</string>
+    <string name="widget_overview_label">AI使用状況 一覧</string>
+    <string name="widget_overview_description">接続済みAIプロバイダーの使用率・ペース目安・リセットまでの時間を表示します。</string>
+    <string name="widget_single_label">AI使用状況 個別</string>
+    <string name="widget_single_description">選択した1つのAIアカウントの使用状況をコンパクトに表示します。</string>
+</resources>

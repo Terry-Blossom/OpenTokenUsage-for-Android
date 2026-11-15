@@ -1,0 +1,3 @@
+-keep class com.opentokenusage.android.domain.model.** { *; }
+-keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod
+-dontwarn kotlinx.serialization.**
