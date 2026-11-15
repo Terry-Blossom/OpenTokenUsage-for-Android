@@ -88,17 +88,25 @@ fun SettingsScreen(
         mutableStateOf(settings.manualUsdRate?.toString().orEmpty())
     }
 
+    var pendingNotificationAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     val notifPermLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
-    ) { _ -> }
+    ) { granted ->
+        if (granted) pendingNotificationAction?.invoke()
+        pendingNotificationAction = null
+    }
 
-    fun ensureNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val granted = ContextCompat.checkSelfPermission(
+    fun ensureNotificationPermission(onGranted: (() -> Unit)? = null) {
+        val granted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(
                 context,
                 Manifest.permission.POST_NOTIFICATIONS,
             ) == PackageManager.PERMISSION_GRANTED
-            if (!granted) notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        if (granted) {
+            onGranted?.invoke()
+        } else {
+            pendingNotificationAction = onGranted
+            notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 
@@ -303,6 +311,24 @@ fun SettingsScreen(
                         if (v) ensureNotificationPermission()
                         onUpdateSettings { it.copy(notifyResetAlerts = v) }
                     },
+                )
+                SwitchRow(
+                    title = "使用量を通知バーに常時表示",
+                    checked = settings.persistentNotificationEnabled,
+                    onCheckedChange = { enabled ->
+                        if (enabled) {
+                            ensureNotificationPermission {
+                                onUpdateSettings { it.copy(persistentNotificationEnabled = true) }
+                            }
+                        } else {
+                            onUpdateSettings { it.copy(persistentNotificationEnabled = false) }
+                        }
+                    },
+                )
+                Text(
+                    "アプリを閉じても、最後に取得した使用率を通知に残します。更新は自動更新間隔に従います。",
+                    color = colors.textMuted,
+                    fontSize = 11.sp,
                 )
             }
 
