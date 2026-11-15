@@ -12,6 +12,8 @@
   - 単体ウィジェット（指定したアカウント 1 件を大きく表示・設定画面付き）
 - **PC版 OpenTokenUsage 同期（Desktop Sync）**: PC 版の Local HTTP API（既定ポート `6736`、Tailscale 等＋Bearer 認証プロキシ経由）に接続し、PC 側で計測中のプロバイダーを Android にミラー表示できます。
 - **各種プロバイダーの直接取得**: API キー / OAuth / セッション認証情報の入力に対応し、認証情報は AndroidX Security Crypto（`EncryptedSharedPreferences`）で端末内に暗号化保存します。
+- **Cursor X サブスク対応**: 新しい X サブスクプランでは共有の週次プールのみを表示し、旧プラン向けの Plan usage・On-demand・Grok Bot は非表示にします。
+- **通知バー常時表示**: 最新の使用率を通知バーに常時表示できます（設定でオン/オフ）。更新はバックグラウンドの自動更新に従います。
 - **バックグラウンド更新**: `WorkManager` による定期更新と、リセット周期に対する消費ペース計算（`PaceCalculator`）に対応しています。
 
 ## 技術スタック

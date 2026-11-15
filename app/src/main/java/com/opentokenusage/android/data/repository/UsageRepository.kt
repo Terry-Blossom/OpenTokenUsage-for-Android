@@ -95,6 +95,9 @@ class UsageRepository(
             _lastSyncMs.value = _snapshots.value.values.maxOfOrNull { it.fetchedAtMs }
             initialized = true
         }
+        runCatching {
+            notificationHelper.updatePersistentNotification(orderedDisplaySnapshots(), _settings.value)
+        }
     }
 
     /** Tests connection cleanly without persisting yet; throws ProviderProbeException on failure. */
@@ -491,5 +494,8 @@ class UsageRepository(
     suspend fun updateWidgets() {
         runCatching { UsageOverviewWidget().updateAll(context.applicationContext) }
         runCatching { UsageSingleWidget().updateAll(context.applicationContext) }
+        runCatching {
+            notificationHelper.updatePersistentNotification(orderedDisplaySnapshots(), _settings.value)
+        }
     }
 }

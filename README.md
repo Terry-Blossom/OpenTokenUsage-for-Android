@@ -12,6 +12,8 @@ Android companion app and home-screen widgets inspired by [PowerUserZ/OpenTokenU
   - Single-provider widget (configurable per account)
 - **Desktop Sync**: Connect to the PC OpenTokenUsage Local HTTP API (`:6736`, e.g. over Tailscale + Bearer token proxy) to mirror desktop-only or local-CLI providers on Android.
 - **Direct Provider Support**: Supports direct API key / OAuth / session credential entry and encrypted local storage via AndroidX Security Crypto (`EncryptedSharedPreferences`).
+- **Cursor X Subscription aware**: On the new Cursor X Subscription plans, only the shared weekly pool (`Total usage`) is shown; legacy plan, on-demand, and Grok Bot lines are hidden.
+- **Persistent notification**: Optional ongoing notification in the status bar with the latest usage per account, refreshed by the background schedule.
 - **Background Refresh**: Periodic updates powered by `WorkManager` with pace calculation (`PaceCalculator`).
 
 ## Tech Stack

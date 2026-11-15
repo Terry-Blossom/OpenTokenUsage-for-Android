@@ -1,6 +1,7 @@
 package com.opentokenusage.android.util
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -15,6 +16,7 @@ import com.opentokenusage.android.MainActivity
 import com.opentokenusage.android.R
 import com.opentokenusage.android.domain.logic.PaceCalculator
 import com.opentokenusage.android.domain.logic.PaceTier
+import com.opentokenusage.android.domain.logic.UsageDisplayFormatter
 import com.opentokenusage.android.domain.model.AppSettings
 import com.opentokenusage.android.domain.model.MetricLine
 import com.opentokenusage.android.domain.model.ProviderSnapshot
@@ -24,15 +26,94 @@ class NotificationHelper(private val context: Context) {
 
     fun ensureChannels() {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val channel = NotificationChannel(
+        val alertChannel = NotificationChannel(
             CHANNEL_ALERTS,
             "使用量・リセット通知",
             NotificationManager.IMPORTANCE_DEFAULT,
         ).apply {
             description = "クォータ上限への接近、超過ペース、リセット完了を通知します"
         }
-        nm.createNotificationChannel(channel)
+        nm.createNotificationChannel(alertChannel)
+
+        val statusChannel = NotificationChannel(
+            CHANNEL_STATUS,
+            "使用量の常時表示",
+            NotificationManager.IMPORTANCE_LOW,
+        ).apply {
+            description = "通知バーに最新の使用量を常時表示します"
+            setShowBadge(false)
+        }
+        nm.createNotificationChannel(statusChannel)
     }
+
+    /**
+     * Keeps a single silent, non-dismissible notification in the shade with the latest
+     * usage per account. Called whenever snapshots or settings change.
+     */
+    @SuppressLint("MissingPermission")
+    fun updatePersistentNotification(
+        snapshots: List<ProviderSnapshot>,
+        settings: AppSettings,
+        nowMs: Long = System.currentTimeMillis(),
+    ) {
+        if (!settings.persistentNotificationEnabled || snapshots.isEmpty()) {
+            cancelPersistentNotification()
+            return
+        }
+        if (!canPostNotifications()) return
+
+        val rows = snapshots.mapNotNull { snapshot ->
+            val line = snapshot.overviewLines()
+                .filterIsInstance<MetricLine.Progress>()
+                .minByOrNull { it.primaryOrder ?: Int.MAX_VALUE }
+            when {
+                line != null -> {
+                    val pct = (line.usedFraction * 100.0).roundToInt()
+                    val staleSuffix = if (snapshot.isStale) "（更新失敗）" else ""
+                    "${notificationLabel(snapshot)}: 使用 $pct%$staleSuffix"
+                }
+                !snapshot.errorMessage.isNullOrBlank() -> "${notificationLabel(snapshot)}: 取得エラー"
+                else -> null
+            }
+        }
+        if (rows.isEmpty()) {
+            cancelPersistentNotification()
+            return
+        }
+
+        val preview = buildString {
+            append(rows.take(3).joinToString(" · "))
+            if (rows.size > 3) append(" ほか${rows.size - 3}件")
+        }
+        val updatedAtMs = snapshots.maxOfOrNull { it.fetchedAtMs }?.takeIf { it > 0L } ?: nowMs
+        val notification = NotificationCompat.Builder(context, CHANNEL_STATUS)
+            .setSmallIcon(R.drawable.ic_stat_usage)
+            .setContentTitle("使用量")
+            .setContentText(preview)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(rows.joinToString("\n")))
+            .setSubText("更新 ${UsageDisplayFormatter.formatTimeHm(updatedAtMs, settings.clock24h)}")
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setShowWhen(false)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setContentIntent(openAppIntent(PERSISTENT_ID))
+            .build()
+
+        runCatching { NotificationManagerCompat.from(context).notify(PERSISTENT_ID, notification) }
+    }
+
+    fun cancelPersistentNotification() {
+        runCatching { NotificationManagerCompat.from(context).cancel(PERSISTENT_ID) }
+    }
+
+    private fun notificationLabel(snapshot: ProviderSnapshot): String =
+        if (snapshot.accountLabel.isBlank()) {
+            snapshot.displayName
+        } else {
+            "${snapshot.displayName} (${snapshot.accountLabel})"
+        }
 
     /**
      * Evaluates threshold, pace, and reset notifications and deduplicates across refreshes
@@ -116,36 +197,44 @@ class NotificationHelper(private val context: Context) {
         return mutable.filterValues { it >= cutoff }
     }
 
+    @SuppressLint("MissingPermission")
     private fun postNotification(id: Int, title: String, body: String) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val granted = ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.POST_NOTIFICATIONS,
-            ) == PackageManager.PERMISSION_GRANTED
-            if (!granted) return
-        }
-        val intent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
-        val pendingIntent = PendingIntent.getActivity(
-            context,
-            id,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
+        if (!canPostNotifications()) return
         val notification = NotificationCompat.Builder(context, CHANNEL_ALERTS)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(title)
             .setContentText(body)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setContentIntent(pendingIntent)
+            .setContentIntent(openAppIntent(id))
             .setAutoCancel(true)
             .build()
 
         runCatching { NotificationManagerCompat.from(context).notify(id, notification) }
     }
 
+    private fun openAppIntent(requestCode: Int): PendingIntent {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        return PendingIntent.getActivity(
+            context,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    private fun canPostNotifications(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return true
+        return ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.POST_NOTIFICATIONS,
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
     companion object {
         const val CHANNEL_ALERTS = "usage_alerts"
+        const val CHANNEL_STATUS = "usage_status"
+        private const val PERSISTENT_ID = 1201
     }
 }
