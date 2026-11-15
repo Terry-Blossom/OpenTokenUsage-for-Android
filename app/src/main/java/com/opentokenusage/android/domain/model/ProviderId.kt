@@ -62,7 +62,7 @@ enum class ProviderId(
         brandColorRgb = 0xFF4285F4,
         authMode = ProviderAuthMode.OAUTH_OR_JSON,
         keyHelpUrl = "https://idx.dev",
-        localFileHint = "Google OAuth Refresh Token または PC版同期",
+        localFileHint = "Google OAuth Refresh Token またはデスクトップアプリからの連携",
     ),
     JETBRAINS_AI_ASSISTANT(
         id = "jetbrains-ai-assistant",
@@ -70,7 +70,7 @@ enum class ProviderId(
         brandColorRgb = 0xFF7D5FE6,
         authMode = ProviderAuthMode.DESKTOP_SYNC_RECOMMENDED,
         keyHelpUrl = "https://www.jetbrains.com/ai/",
-        localFileHint = "PCローカルIDEのみ対応（PC版 OpenTokenUsage 同期を推奨）",
+        localFileHint = "デスクトップIDEのみ対応（デスクトップアプリ経由で連携できます）",
     ),
     OPENROUTER(
         id = "openrouter",
@@ -172,11 +172,11 @@ enum class ProviderId(
     ),
     DESKTOP_SYNC(
         id = "desktop-sync",
-        displayName = "PC版 OpenTokenUsage 同期",
+        displayName = "デスクトップデータ",
         brandColorRgb = 0xFF0078D4,
         authMode = ProviderAuthMode.DESKTOP_SYNC_HUB,
         keyHelpUrl = "https://github.com/PowerUserZ/OpenTokenUsage",
-        localFileHint = "PC版の設定で Local HTTP API (:6736) を有効化し、Tailscale等経由のURLを指定",
+        localFileHint = "デスクトップ版の設定で Local HTTP API (:6736) を有効化し、Tailscale等経由のURLを指定",
         supportsCustomHost = true,
     );
 

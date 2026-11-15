@@ -87,6 +87,6 @@ tailscale serve --bg --https=6736 http://127.0.0.1:16736
 ```
 
 3. **Configure the Android app**:
-   - Add provider -> **Desktop Sync (`PC版 OpenTokenUsage 同期`)**
+   - Add provider -> **Desktop data**
    - **URL**: `https://<your-device>.ts.net:6736`
    - **Bearer Token**: `<YOUR_TOKEN>`

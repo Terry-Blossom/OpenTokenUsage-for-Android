@@ -143,7 +143,7 @@ fun AddProviderScreen(
                                         ProviderAuthMode.API_KEY -> "APIキーで接続"
                                         ProviderAuthMode.OAUTH_OR_JSON -> "OAuthトークン / 認証JSON"
                                         ProviderAuthMode.SESSION_OR_OAUTH -> "Access Token / Session Cookie"
-                                        ProviderAuthMode.DESKTOP_SYNC_RECOMMENDED -> "PC版 OpenTokenUsage 同期向け"
+                                        ProviderAuthMode.DESKTOP_SYNC_RECOMMENDED -> "デスクトップ版 OpenTokenUsage との連携向け"
                                         ProviderAuthMode.DESKTOP_SYNC_HUB -> "PC上の複数プロバイダーを一括同期"
                                     }
                                     Text(sub, color = colors.textMuted, fontSize = 11.sp)
@@ -270,7 +270,7 @@ private fun ProviderCredentialForm(
                     ) {
                         Text(
                             text = when (provider) {
-                                ProviderId.DESKTOP_SYNC -> "PC側の設定手順"
+                                ProviderId.DESKTOP_SYNC -> "デスクトップ側の設定手順"
                                 else -> "取得元の目安"
                             },
                             color = colors.textPrimary,
@@ -279,7 +279,7 @@ private fun ProviderCredentialForm(
                         )
                         val guide = when (provider) {
                             ProviderId.DESKTOP_SYNC ->
-                                "PC版 OpenTokenUsage で Local HTTP API (既定 :6736) を有効化し、Tailscale IP 等の URL（例: http://100.x.y.z:6736）を入力してください。"
+                                "デスクトップ版 OpenTokenUsage で Local HTTP API (既定 :6736) を有効化し、Tailscale IP 等の URL（例: http://100.x.y.z:6736）を入力してください。"
                             ProviderId.CLAUDE ->
                                 "PCの ${provider.localFileHint} の中身（JSON全体）をそのまま貼り付けると Access / Refresh Token を自動抽出します。"
                             ProviderId.CODEX ->
@@ -318,7 +318,7 @@ private fun ProviderCredentialForm(
                     label = {
                         Text(
                             if (provider == ProviderId.DESKTOP_SYNC || provider == ProviderId.JETBRAINS_AI_ASSISTANT) {
-                                "PC版 OpenTokenUsage URL"
+                                "デスクトップ版 OpenTokenUsage URL"
                             } else {
                                 "ホスト名"
                             },
@@ -456,7 +456,7 @@ private fun ProviderCredentialForm(
                         errorMsg = null
                         val trimmedHost = customHost.trim()
                         if (provider == ProviderId.DESKTOP_SYNC && trimmedHost.isEmpty()) {
-                            errorMsg = "PC版 OpenTokenUsage の URL を入力してください"
+                            errorMsg = "デスクトップ版 OpenTokenUsage の URL を入力してください"
                             return@launch
                         }
                         if (provider != ProviderId.DESKTOP_SYNC &&

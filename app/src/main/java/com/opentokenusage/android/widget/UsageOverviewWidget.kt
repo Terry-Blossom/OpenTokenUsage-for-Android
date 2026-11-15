@@ -217,7 +217,7 @@ private fun OverviewWidgetContent(
                 )
                 Spacer(GlanceModifier.height(4.dp))
                 Text(
-                    text = "タップして API キーまたは PC同期を追加",
+                    text = "タップして API キーまたはデスクトップデータを追加",
                     style = TextStyle(color = mutedColor, fontSize = 11.sp),
                 )
             }

@@ -233,6 +233,7 @@ class CursorClient(
 
                 val isXPlan = mergedByPlan == true ||
                     isXSubscriptionMembership(membership) ||
+                    isXSubscriptionPlanName(planName) ||
                     (!planInfoKnown && looksLikeUnifiedUsage(usage?.objOrNull("planUsage")))
                 if (isXPlan) {
                     var totalPercent = usage?.objOrNull("planUsage")?.doubleOrNull("totalPercentUsed")
@@ -382,6 +383,11 @@ class CursorClient(
     private fun isXSubscriptionMembership(raw: String?): Boolean {
         val value = raw?.trim()?.lowercase(Locale.ROOT) ?: return false
         return value == "plus" || value == "premium" || value == "super" || value.startsWith("unified_")
+    }
+
+    private fun isXSubscriptionPlanName(raw: String?): Boolean {
+        val value = raw?.trim()?.lowercase(Locale.ROOT)?.replace('_', ' ') ?: return false
+        return value in setOf("plus", "premium", "super", "unified ultra")
     }
 
     /**

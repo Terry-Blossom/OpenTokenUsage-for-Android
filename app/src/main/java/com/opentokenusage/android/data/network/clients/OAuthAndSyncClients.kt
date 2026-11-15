@@ -487,7 +487,7 @@ class AntigravityClient(
         var access = cur.accessToken.trim()
         val refresh = cur.refreshToken.trim()
         if (access.isEmpty() && refresh.isEmpty()) {
-            throw ProviderProbeException("Antigravity の OAuth トークンが未設定です。PC版 OpenTokenUsage 同期も利用できます。", isAuthError = true)
+            throw ProviderProbeException("Antigravity の OAuth トークンが未設定です。デスクトップアプリからの連携も利用できます。", isAuthError = true)
         }
         var updated: AccountSecret? = null
         val exp = cur.expiresAtMs
@@ -678,7 +678,7 @@ class AntigravityClient(
         val clientSecret = com.opentokenusage.android.BuildConfig.ANTIGRAVITY_OAUTH_CLIENT_SECRET
         if (clientId.isBlank() || clientSecret.isBlank()) {
             throw ProviderProbeException(
-                "Google OAuth クライアント設定が未構成のため自動更新できません（PC版同期または有効なアクセストークンを利用してください）",
+                "Google OAuth クライアント設定が未構成のため自動更新できません（デスクトップアプリからの連携、または有効なアクセストークンを利用してください）",
                 isAuthError = true,
             )
         }
@@ -705,7 +705,7 @@ class DesktopSyncClient(
 ) : ProviderClient {
     override suspend fun probe(account: ConfiguredAccount, secret: AccountSecret, nowMs: Long): ProbeResult {
         val rawHost = account.customHost.trim().ifBlank {
-            throw ProviderProbeException("PC版 OpenTokenUsage の接続先 URL を入力してください（例: http://100.x.y.z:6736）", isAuthError = true)
+            throw ProviderProbeException("デスクトップ版 OpenTokenUsage の接続先 URL を入力してください（例: http://100.x.y.z:6736）", isAuthError = true)
         }
         val normalized = if (rawHost.startsWith("http://") || rawHost.startsWith("https://")) {
             rawHost.trimEnd('/')
@@ -721,14 +721,14 @@ class DesktopSyncClient(
         }
         val resp = ProviderHttpSupport.get(http, url, headers)
         if (resp.statusCode == 401 || resp.statusCode == 403) {
-            throw ProviderProbeException("PC版同期の認証エラー (HTTP ${resp.statusCode})", isAuthError = true)
+            throw ProviderProbeException("デスクトップ連携の認証エラー (HTTP ${resp.statusCode})", isAuthError = true)
         }
         if (resp.statusCode !in 200..299) {
-            throw ProviderProbeException("PC版同期に失敗しました (HTTP ${resp.statusCode})")
+            throw ProviderProbeException("デスクトップ連携に失敗しました (HTTP ${resp.statusCode})")
         }
 
         val rootElement = runCatching { ProviderHttpSupport.json.parseToJsonElement(resp.bodyText) }.getOrNull()
-            ?: throw ProviderProbeException("PC版同期の JSON 解析に失敗しました")
+            ?: throw ProviderProbeException("デスクトップ連携の JSON 解析に失敗しました")
 
         val providerArr: JsonArray = when (rootElement) {
             is JsonArray -> rootElement
@@ -752,7 +752,7 @@ class DesktopSyncClient(
                 accountId = "sync_${account.id}_$pid",
                 providerId = pid,
                 displayName = pName,
-                accountLabel = if (account.label.isNotBlank()) "${account.label} / PC同期" else "PC同期",
+                accountLabel = account.label,
                 plan = pPlan,
                 lines = parsedLines,
                 fetchedAtMs = fetchedAt,
@@ -763,9 +763,9 @@ class DesktopSyncClient(
 
         val summaryLines = listOf(
             MetricLine.Text(
-                label = "同期プロバイダー数",
+                label = "連携プロバイダー数",
                 value = "${synced.size} 件",
-                subtitle = if (synced.isEmpty()) "PC側に有効なプロバイダーがありません" else synced.joinToString(", ") { it.displayName },
+                subtitle = if (synced.isEmpty()) "デスクトップ側に有効なプロバイダーがありません" else synced.joinToString(", ") { it.displayName },
             ),
         )
         return ProbeResult(
@@ -839,9 +839,9 @@ class JetBrainsSyncHintClient(
             val hub = DesktopSyncClient(http, ProviderEndpointOverrides())
             val res = hub.probe(account, secret, nowMs)
             val jb = res.desktopSyncedSnapshots?.firstOrNull { it.providerId == ProviderId.JETBRAINS_AI_ASSISTANT.id }
-                ?: throw ProviderProbeException("PC側に JetBrains AI Assistant のデータがまだありません")
+                ?: throw ProviderProbeException("デスクトップ側に JetBrains AI Assistant のデータがまだありません")
             return ProbeResult(plan = jb.plan, lines = jb.lines)
         }
-        throw ProviderProbeException("JetBrains AI は PCローカルIDE設定のみ対応です。PC版 OpenTokenUsage 同期URLを設定してください。", isAuthError = false)
+        throw ProviderProbeException("JetBrains AI はデスクトップIDE設定のみ対応です。デスクトップ版 OpenTokenUsage のURLを設定してください。", isAuthError = false)
     }
 }

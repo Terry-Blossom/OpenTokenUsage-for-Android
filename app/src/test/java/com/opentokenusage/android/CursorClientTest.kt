@@ -85,6 +85,30 @@ class CursorClientTest {
     }
 
     @Test
+    fun premiumPlanNameShowsOnlyTotalUsageEvenWhenIsMergedIsFalse() = runTest {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"billingCycleStart":"2026-10-18T06:32:13Z","billingCycleEnd":"2026-10-25T06:32:13Z","planUsage":{"totalPercentUsed":35,"limit":0},"spendLimitUsage":{"individualLimit":5000,"individualRemaining":4000}}""",
+            ),
+        )
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"isMerged":false,"planInfo":{"planName":"Premium"}}""",
+            ),
+        )
+
+        val result = client().probe(
+            ConfiguredAccount("c1", ProviderId.CURSOR.id),
+            AccountSecret(accessToken = "tok"),
+        )
+
+        assertEquals(1, result.lines.size)
+        val only = result.lines.single() as MetricLine.Progress
+        assertEquals("Total usage", only.label)
+        assertEquals(35.0, only.used, 0.01)
+    }
+
+    @Test
     fun legacyPlanKeepsDetailedUsageLines() = runTest {
         server.enqueue(
             MockResponse().setResponseCode(200).setBody(

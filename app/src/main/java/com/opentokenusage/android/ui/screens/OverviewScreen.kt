@@ -285,7 +285,7 @@ private fun EmptyDashboardView(
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    text = "APIキー、CLI認証JSON、またはPC版 OpenTokenUsage の同期URLを追加すると、使用率とホーム画面ウィジェットに実データが表示されます。",
+                    text = "APIキー、CLI認証JSON、またはデスクトップ版の接続先を追加すると、使用率とホーム画面ウィジェットに実データが表示されます。",
                     color = colors.textSecondary,
                     fontSize = 13.sp,
                     lineHeight = 19.sp,
@@ -314,7 +314,7 @@ private fun EmptyDashboardView(
                         modifier = Modifier.size(17.dp),
                     )
                     Spacer(Modifier.width(6.dp))
-                    Text("PC版 OpenTokenUsage と同期", color = colors.textPrimary)
+                    Text("デスクトップデータを取り込む", color = colors.textPrimary)
                 }
                 OutlinedButton(
                     onClick = onPinOverviewWidget,
