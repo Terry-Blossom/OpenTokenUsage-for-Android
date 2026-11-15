@@ -1,5 +1,6 @@
 package com.opentokenusage.android.data.network.clients
 
+import com.opentokenusage.android.data.network.HttpResponseData
 import com.opentokenusage.android.data.network.ProviderHttpSupport
 import com.opentokenusage.android.data.network.ProviderProbeException
 import com.opentokenusage.android.data.network.boolOrNull
@@ -152,6 +153,35 @@ class CursorClient(
             accessToken = currentSecret.accessToken
         }
 
+        // Rebuild the cookie from the current token so a mid-probe refresh is reflected.
+        fun currentSessionHeader(): String = cookieToken.ifBlank {
+            val sub = CredentialInputParser.decodeJwtSubject(accessToken)
+            val userId = sub?.substringAfter('|', sub)
+            if (!userId.isNullOrBlank()) "$userId%3A%3A$accessToken" else ""
+        }
+
+        // usage-summary is the only place the membership type is exposed. Fetch it at most once.
+        var summaryResponse: HttpResponseData? = null
+        var summaryRequested = false
+
+        suspend fun usageSummaryResponse(): HttpResponseData? {
+            if (!summaryRequested) {
+                summaryRequested = true
+                val sessionHeader = currentSessionHeader()
+                summaryResponse = if (sessionHeader.isNotBlank()) {
+                    runCatching { fetchUsageSummary(webBase, sessionHeader) }.getOrNull()
+                } else {
+                    null
+                }
+            }
+            return summaryResponse
+        }
+
+        fun usageSummaryJson(): JsonObject? =
+            summaryResponse
+                ?.takeIf { it.statusCode in 200..299 }
+                ?.let { ProviderHttpSupport.tryParseObject(it.bodyText) }
+
         val lines = mutableListOf<MetricLine>()
         var planName: String? = null
 
@@ -172,129 +202,211 @@ class CursorClient(
                 val planResp = runCatching {
                     connectPost(api2Base, "/aiserver.v1.DashboardService/GetPlanInfo", accessToken)
                 }.getOrNull()
-                val planObj = planResp?.takeIf { it.statusCode in 200..299 }
+                val planJson = planResp
+                    ?.takeIf { it.statusCode in 200..299 }
                     ?.let { ProviderHttpSupport.tryParseObject(it.bodyText) }
-                    ?.objOrNull("planInfo")
-                planName = planObj?.strOrNull("planName")
+                val planInfo = planJson?.objOrNull("planInfo")
+                planName = planInfo?.strOrNull("planName")
+                val planInfoKnown = planJson != null
+                val mergedByPlan = planJson?.boolOrNull("isMerged") ?: planInfo?.boolOrNull("isMerged")
 
                 val cycleStart = ProviderHttpSupport.parseDateMs(usage?.get("billingCycleStart"))
                 val cycleEnd = ProviderHttpSupport.parseDateMs(usage?.get("billingCycleEnd"))
-                val periodMs = if (cycleStart != null && cycleEnd != null && cycleEnd > cycleStart) {
+                val cyclePeriodMs = if (cycleStart != null && cycleEnd != null && cycleEnd > cycleStart) {
                     cycleEnd - cycleStart
                 } else {
-                    30L * 24L * 3600_000L
+                    null
                 }
 
-                usage?.objOrNull("planUsage")?.let { pu ->
-                    val limitCents = pu.doubleOrNull("limit")
-                    val remainingCents = pu.doubleOrNull("remaining")
-                    val usedCents = pu.doubleOrNull("totalSpend")
-                        ?: pu.doubleOrNull("includedSpend")
-                        ?: if (limitCents != null && remainingCents != null) max(0.0, limitCents - remainingCents) else null
-                    if (limitCents != null && limitCents > 0.0 && usedCents != null) {
+                // When plan info is unavailable, fall back to the membership type from usage-summary.
+                val summary = if (!planInfoKnown) {
+                    usageSummaryResponse()
+                        ?.takeIf { it.statusCode in 200..299 }
+                        ?.let { ProviderHttpSupport.tryParseObject(it.bodyText) }
+                } else {
+                    null
+                }
+                val membership = summary?.strOrNull("membershipType")
+                if (planName.isNullOrBlank() && membership != null) {
+                    planName = membershipLabel(membership)
+                }
+
+                val isXPlan = mergedByPlan == true ||
+                    isXSubscriptionMembership(membership) ||
+                    (!planInfoKnown && looksLikeUnifiedUsage(usage?.objOrNull("planUsage")))
+                if (isXPlan) {
+                    var totalPercent = usage?.objOrNull("planUsage")?.doubleOrNull("totalPercentUsed")
+                    if (totalPercent == null) {
+                        usageSummaryResponse()
+                        totalPercent = usageSummaryJson()
+                            ?.objOrNull("individualUsage")
+                            ?.objOrNull("plan")
+                            ?.doubleOrNull("totalPercentUsed")
+                    }
+                    if (totalPercent != null) {
+                        var resetMs = cycleEnd
+                        if (resetMs == null) {
+                            usageSummaryResponse()
+                            resetMs = ProviderHttpSupport.parseDateMs(usageSummaryJson()?.get("billingCycleEnd"))
+                        }
+                        val periodMs = cyclePeriodMs ?: WEEK_MS
                         lines += MetricLine.Progress(
-                            label = "Plan usage",
-                            used = usedCents / 100.0,
-                            limit = limitCents / 100.0,
-                            format = MetricFormat.Dollars,
-                            resetsAtMs = cycleEnd,
+                            label = "Total usage",
+                            used = totalPercent.coerceIn(0.0, 100.0),
+                            limit = 100.0,
+                            format = MetricFormat.Percent,
+                            resetsAtMs = resetMs,
                             periodDurationMs = periodMs,
                             primaryOrder = 1,
+                            period = if (isWeeklyPeriod(periodMs)) "weekly" else null,
                         )
-                    } else {
-                        pu.doubleOrNull("autoPercentUsed")?.let { autoPct ->
+                    }
+                } else {
+                    val periodMs = cyclePeriodMs ?: 30L * 24L * 3600_000L
+
+                    usage?.objOrNull("planUsage")?.let { pu ->
+                        val limitCents = pu.doubleOrNull("limit")
+                        val remainingCents = pu.doubleOrNull("remaining")
+                        val usedCents = pu.doubleOrNull("totalSpend")
+                            ?: pu.doubleOrNull("includedSpend")
+                            ?: if (limitCents != null && remainingCents != null) max(0.0, limitCents - remainingCents) else null
+                        if (limitCents != null && limitCents > 0.0 && usedCents != null) {
                             lines += MetricLine.Progress(
-                                label = "Auto usage",
-                                used = autoPct.coerceIn(0.0, 100.0),
-                                limit = 100.0,
-                                format = MetricFormat.Percent,
+                                label = "Plan usage",
+                                used = usedCents / 100.0,
+                                limit = limitCents / 100.0,
+                                format = MetricFormat.Dollars,
                                 resetsAtMs = cycleEnd,
                                 periodDurationMs = periodMs,
                                 primaryOrder = 1,
                             )
-                        }
-                    }
-                }
-
-                usage?.objOrNull("spendLimitUsage")?.let { su ->
-                    val lim = su.doubleOrNull("individualLimit") ?: su.doubleOrNull("pooledLimit")
-                    val rem = su.doubleOrNull("individualRemaining") ?: su.doubleOrNull("pooledRemaining")
-                    val used = su.doubleOrNull("individualUsed") ?: su.doubleOrNull("pooledUsed") ?: su.doubleOrNull("totalSpend")
-                        ?: if (lim != null && rem != null) max(0.0, lim - rem) else null
-                    if (lim != null && lim > 0.0 && used != null) {
-                        lines += MetricLine.Progress(
-                            label = "On-demand",
-                            used = used / 100.0,
-                            limit = lim / 100.0,
-                            format = MetricFormat.Dollars,
-                            resetsAtMs = cycleEnd,
-                            periodDurationMs = periodMs,
-                            primaryOrder = if (lines.isEmpty()) 1 else 2,
-                        )
-                    }
-                }
-
-                // Grok Bot / Sand
-                runCatching { connectPost(api2Base, "/aiserver.v1.DashboardService/GetSandUsageStatus", accessToken) }
-                    .getOrNull()
-                    ?.takeIf { it.statusCode in 200..299 }
-                    ?.let { ProviderHttpSupport.tryParseObject(it.bodyText) }
-                    ?.let { sand ->
-                        if (sand.boolOrNull("usesPooledEnterpriseAllowance") != true && sand.boolOrNull("hasNonZeroIncludedLimit") != false) {
-                            sand.doubleOrNull("usagePercent")?.takeIf { it >= 0.0 }?.let { pct ->
+                        } else {
+                            val totalPct = pu.doubleOrNull("totalPercentUsed")
+                            val autoPct = pu.doubleOrNull("autoPercentUsed")
+                            (totalPct ?: autoPct)?.let { pct ->
                                 lines += MetricLine.Progress(
-                                    label = "Grok Bot",
+                                    label = if (totalPct != null) "Total usage" else "Auto usage",
                                     used = pct.coerceIn(0.0, 100.0),
                                     limit = 100.0,
                                     format = MetricFormat.Percent,
-                                    resetsAtMs = ProviderHttpSupport.parseDateMs(sand["nextResetTimestampUtc"]),
-                                    periodDurationMs = 7L * 24L * 3600_000L,
-                                    scope = "detail",
+                                    resetsAtMs = cycleEnd,
+                                    periodDurationMs = periodMs,
+                                    primaryOrder = 1,
                                 )
                             }
                         }
                     }
+
+                    usage?.objOrNull("spendLimitUsage")?.let { su ->
+                        val lim = su.doubleOrNull("individualLimit") ?: su.doubleOrNull("pooledLimit")
+                        val rem = su.doubleOrNull("individualRemaining") ?: su.doubleOrNull("pooledRemaining")
+                        val used = su.doubleOrNull("individualUsed") ?: su.doubleOrNull("pooledUsed") ?: su.doubleOrNull("totalSpend")
+                            ?: if (lim != null && rem != null) max(0.0, lim - rem) else null
+                        if (lim != null && lim > 0.0 && used != null) {
+                            lines += MetricLine.Progress(
+                                label = "On-demand",
+                                used = used / 100.0,
+                                limit = lim / 100.0,
+                                format = MetricFormat.Dollars,
+                                resetsAtMs = cycleEnd,
+                                periodDurationMs = periodMs,
+                                primaryOrder = if (lines.isEmpty()) 1 else 2,
+                            )
+                        }
+                    }
+
+                    // Grok Bot / Sand is a separate allowance on legacy plans only.
+                    runCatching { connectPost(api2Base, "/aiserver.v1.DashboardService/GetSandUsageStatus", accessToken) }
+                        .getOrNull()
+                        ?.takeIf { it.statusCode in 200..299 }
+                        ?.let { ProviderHttpSupport.tryParseObject(it.bodyText) }
+                        ?.let { sand ->
+                            if (sand.boolOrNull("usesPooledEnterpriseAllowance") != true && sand.boolOrNull("hasNonZeroIncludedLimit") != false) {
+                                sand.doubleOrNull("usagePercent")?.takeIf { it >= 0.0 }?.let { pct ->
+                                    lines += MetricLine.Progress(
+                                        label = "Grok Bot",
+                                        used = pct.coerceIn(0.0, 100.0),
+                                        limit = 100.0,
+                                        format = MetricFormat.Percent,
+                                        resetsAtMs = ProviderHttpSupport.parseDateMs(sand["nextResetTimestampUtc"]),
+                                        periodDurationMs = WEEK_MS,
+                                        scope = "detail",
+                                    )
+                                }
+                            }
+                        }
+                }
             }
         }
 
-        // Fallback via WorkosCursorSessionToken Cookie / usage-summary if ConnectRPC yielded nothing
+        // Fallback via WorkosCursorSessionToken Cookie / usage-summary if ConnectRPC yielded nothing.
         if (lines.isEmpty()) {
-            val sessionHeader = cookieToken.ifBlank {
-                val sub = CredentialInputParser.decodeJwtSubject(accessToken)
-                val userId = sub?.substringAfter('|', sub)
-                if (!userId.isNullOrBlank()) "$userId%3A%3A$accessToken" else ""
-            }
-            if (sessionHeader.isNotBlank()) {
-                val summaryResp = ProviderHttpSupport.get(
-                    http,
-                    "$webBase/api/usage-summary",
-                    mapOf("Cookie" to "WorkosCursorSessionToken=$sessionHeader", "Accept" to "application/json"),
-                )
-                if (summaryResp.statusCode == 401 || summaryResp.statusCode == 403) {
+            val summaryResp = usageSummaryResponse()
+            val summary = usageSummaryJson()
+            if (summary == null) {
+                if (summaryResp != null && (summaryResp.statusCode == 401 || summaryResp.statusCode == 403)) {
                     throw ProviderProbeException("Cursor セッションが期限切れです", isAuthError = true)
                 }
-                if (summaryResp.statusCode in 200..299) {
-                    val sum = ProviderHttpSupport.tryParseObject(summaryResp.bodyText)
-                    if (planName == null) planName = sum?.strOrNull("membershipType")
-                    val endMs = ProviderHttpSupport.parseDateMs(sum?.get("billingCycleEnd"))
-                    val indPlan = sum?.objOrNull("individualUsage")?.objOrNull("plan")
-                    indPlan?.doubleOrNull("totalPercentUsed")?.let { pct ->
-                        lines += MetricLine.Progress(
-                            label = "Total usage",
-                            used = pct.coerceIn(0.0, 100.0),
-                            limit = 100.0,
-                            format = MetricFormat.Percent,
-                            resetsAtMs = endMs,
-                            periodDurationMs = 30L * 24L * 3600_000L,
-                            primaryOrder = 1,
-                        )
-                    }
+            } else {
+                val membership = summary.strOrNull("membershipType")
+                if (planName.isNullOrBlank() && membership != null) {
+                    planName = membershipLabel(membership)
+                }
+                val isXPlan = isXSubscriptionMembership(membership)
+                summary.objOrNull("individualUsage")?.objOrNull("plan")?.doubleOrNull("totalPercentUsed")?.let { pct ->
+                    lines += MetricLine.Progress(
+                        label = "Total usage",
+                        used = pct.coerceIn(0.0, 100.0),
+                        limit = 100.0,
+                        format = MetricFormat.Percent,
+                        resetsAtMs = ProviderHttpSupport.parseDateMs(summary["billingCycleEnd"]),
+                        periodDurationMs = if (isXPlan) WEEK_MS else 30L * 24L * 3600_000L,
+                        primaryOrder = 1,
+                        period = if (isXPlan) "weekly" else null,
+                    )
                 }
             }
         }
 
         if (lines.isEmpty()) throw ProviderProbeException("Cursor の利用状況が取得できませんでした")
         return ProbeResult(plan = planName, lines = lines, updatedSecret = updatedSecret)
+    }
+
+    private suspend fun fetchUsageSummary(webBase: String, sessionHeader: String): HttpResponseData =
+        ProviderHttpSupport.get(
+            http,
+            "$webBase/api/usage-summary",
+            mapOf("Cookie" to "WorkosCursorSessionToken=$sessionHeader", "Accept" to "application/json"),
+        )
+
+    private fun isXSubscriptionMembership(raw: String?): Boolean {
+        val value = raw?.trim()?.lowercase(Locale.ROOT) ?: return false
+        return value == "plus" || value == "premium" || value == "super" || value.startsWith("unified_")
+    }
+
+    /**
+     * X Subscription responses carry only a shared percentage. Legacy responses also
+     * expose a dollar-denominated included or on-demand allowance.
+     */
+    private fun looksLikeUnifiedUsage(planUsage: JsonObject?): Boolean {
+        if (planUsage == null) return false
+        if (planUsage.doubleOrNull("totalPercentUsed") == null) return false
+        return listOf("limit", "remaining", "totalSpend", "includedSpend")
+            .none { (planUsage.doubleOrNull(it) ?: 0.0) > 0.0 }
+    }
+
+    private fun isWeeklyPeriod(periodMs: Long): Boolean =
+        kotlin.math.abs(periodMs - WEEK_MS) < 24L * 3600_000L
+
+    private fun membershipLabel(raw: String): String {
+        val spaced = raw.trim().replace('_', ' ')
+        return when (spaced.lowercase(Locale.ROOT)) {
+            "pro plus" -> "Pro+"
+            "unified ultra" -> "Ultra"
+            else -> spaced.split(' ')
+                .filter { it.isNotBlank() }
+                .joinToString(" ") { word -> word.replaceFirstChar { ch -> ch.uppercase(Locale.ROOT) } }
+        }
     }
 
     private suspend fun connectPost(base: String, path: String, token: String) =
@@ -330,5 +442,6 @@ class CursorClient(
 
     companion object {
         private const val CLIENT_ID = "KbZUR41cY7W6zRSdpSUJ7I7mLYBKOCmB"
+        private const val WEEK_MS = 7L * 24L * 3600_000L
     }
 }
