@@ -42,3 +42,51 @@ OAuth クライアント情報はリポジトリに含めていません。Antig
 
 - `antigravityOAuthClientId` / `ANTIGRAVITY_OAUTH_CLIENT_ID`
 - `antigravityOAuthClientSecret` / `ANTIGRAVITY_OAUTH_CLIENT_SECRET`
+
+## PC 版同期のセットアップ手順（Tailscale 経由）
+
+PC 版 OpenTokenUsage の Local HTTP API（既定ポート `6736`）は仕様上 `127.0.0.1:6736` のみで待受け、`Host` ヘッダーが `127.0.0.1` / `localhost` 以外の場合は `403 Forbidden` を返します。そのため Android から接続する場合は、PC 側で以下の軽量プロキシを挟みます。
+
+1. **PC 側で読み取り専用＋Bearer 認証プロキシを起動する**（`127.0.0.1:16736` → `127.0.0.1:6736`）:
+   - `Host` ヘッダーを `127.0.0.1:6736` に書き換え（`Origin` は除去）
+   - `Authorization: Bearer <任意のトークン>` を必須化
+   - `GET /v1/usage` と `GET /v1/usage/:providerId` のみ許可
+
+```js
+// 最小構成例: PROXY_TOKEN=任意の長いランダム文字列 node proxy.mjs
+import http from 'node:http';
+
+const TOKEN = process.env.PROXY_TOKEN;
+if (!TOKEN) throw new Error('Set PROXY_TOKEN');
+
+http.createServer((req, res) => {
+  if (req.headers.authorization !== `Bearer ${TOKEN}`) {
+    res.writeHead(401).end('{"error":"unauthorized"}');
+    return;
+  }
+  const path = (req.url || '/').split('?')[0].replace(/\/+$/, '') || '/';
+  if (req.method !== 'GET' || !(path === '/v1/usage' || /^\/v1\/usage\/[a-z0-9-]+$/i.test(path))) {
+    res.writeHead(404).end('{"error":"not_found"}');
+    return;
+  }
+  const up = http.request(
+    { host: '127.0.0.1', port: 6736, path, method: 'GET', headers: { Host: '127.0.0.1:6736', Accept: 'application/json' } },
+    (r) => { res.writeHead(r.statusCode || 502, { 'Content-Type': 'application/json' }); r.pipe(res); },
+  );
+  up.on('error', () => res.writeHead(502).end('{"error":"upstream_unavailable"}'));
+  up.end();
+}).listen(16736, '127.0.0.1');
+```
+
+2. **Tailscale Serve で tailnet 限定公開する**（既存の `:443` とは別ポートで共存可能）:
+
+```bash
+tailscale serve --bg --https=6736 http://127.0.0.1:16736
+```
+
+3. **Android アプリ側で登録する**:
+   - プロバイダー追加 → **「PC版 OpenTokenUsage 同期」** を選択
+   - **PC版 OpenTokenUsage URL**: `https://<あなたの端末名>.ts.net:6736`
+   - **認証トークン（設定している場合のみ・任意）**: 手順 1 で設定した `<任意のトークン>`
+
+※ Android 単体で完結するプロバイダー（OpenRouter / Claude / Codex / Cursor 等）のみを使う場合、PC 同期および Tailscale は不要です。
