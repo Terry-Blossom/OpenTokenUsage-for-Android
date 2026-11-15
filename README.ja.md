@@ -6,11 +6,11 @@
 
 ## 主な機能
 
-- **初期データなし（ダミーデータ非搭載）**: 起動直後は空の状態で始まり、自分でプロバイダーまたは PC 同期先を追加した分だけ表示されます。
+- **初期データなし（ダミーデータ非搭載）**: 起動直後は空の状態で始まり、自分でプロバイダーまたはデスクトップデータを追加した分だけ表示されます。
 - **Jetpack Glance ホーム画面ウィジェット**:
   - 一覧ウィジェット（複数プロバイダーをまとめて表示）
   - 単体ウィジェット（指定したアカウント 1 件を大きく表示・設定画面付き）
-- **PC版 OpenTokenUsage 同期（Desktop Sync）**: PC 版の Local HTTP API（既定ポート `6736`、Tailscale 等＋Bearer 認証プロキシ経由）に接続し、PC 側で計測中のプロバイダーを Android にミラー表示できます。
+- **デスクトップデータ連携**: デスクトップ版の Local HTTP API（既定ポート `6736`、Tailscale 等＋Bearer 認証プロキシ経由）に接続し、デスクトップ側で計測中のプロバイダーを Android に表示できます。
 - **各種プロバイダーの直接取得**: API キー / OAuth / セッション認証情報の入力に対応し、認証情報は AndroidX Security Crypto（`EncryptedSharedPreferences`）で端末内に暗号化保存します。
 - **Cursor X サブスク対応**: 新しい X サブスクプランでは共有の週次プールのみを表示し、旧プラン向けの Plan usage・On-demand・Grok Bot は非表示にします。
 - **通知バー常時表示**: 最新の使用率を通知バーに常時表示できます（設定でオン/オフ）。更新はバックグラウンドの自動更新に従います。
@@ -40,16 +40,16 @@ app/build/outputs/apk/debug/app-debug.apk
 
 ### 補足: Antigravity の OAuth 自動リフレッシュ設定（任意）
 
-OAuth クライアント情報はリポジトリに含めていません。Antigravity のトークン自動更新をビルドに含める場合は、ビルド時に Gradle プロパティまたは環境変数で指定してください（未指定時は PC 版同期または有効なアクセストークンを利用できます）。
+OAuth クライアント情報はリポジトリに含めていません。Antigravity のトークン自動更新をビルドに含める場合は、ビルド時に Gradle プロパティまたは環境変数で指定してください（未指定時はデスクトップアプリからの連携または有効なアクセストークンを利用できます）。
 
 - `antigravityOAuthClientId` / `ANTIGRAVITY_OAUTH_CLIENT_ID`
 - `antigravityOAuthClientSecret` / `ANTIGRAVITY_OAUTH_CLIENT_SECRET`
 
-## PC 版同期のセットアップ手順（Tailscale 経由）
+## デスクトップデータ連携のセットアップ手順（Tailscale 経由）
 
-PC 版 OpenTokenUsage の Local HTTP API（既定ポート `6736`）は仕様上 `127.0.0.1:6736` のみで待受け、`Host` ヘッダーが `127.0.0.1` / `localhost` 以外の場合は `403 Forbidden` を返します。そのため Android から接続する場合は、PC 側で以下の軽量プロキシを挟みます。
+デスクトップ版 OpenTokenUsage の Local HTTP API（既定ポート `6736`）は仕様上 `127.0.0.1:6736` のみで待受け、`Host` ヘッダーが `127.0.0.1` / `localhost` 以外の場合は `403 Forbidden` を返します。そのため Android から接続する場合は、デスクトップ側で以下の軽量プロキシを挟みます。
 
-1. **PC 側で読み取り専用＋Bearer 認証プロキシを起動する**（`127.0.0.1:16736` → `127.0.0.1:6736`）:
+1. **デスクトップ側で読み取り専用＋Bearer 認証プロキシを起動する**（`127.0.0.1:16736` → `127.0.0.1:6736`）:
    - `Host` ヘッダーを `127.0.0.1:6736` に書き換え（`Origin` は除去）
    - `Authorization: Bearer <任意のトークン>` を必須化
    - `GET /v1/usage` と `GET /v1/usage/:providerId` のみ許可
@@ -87,8 +87,8 @@ tailscale serve --bg --https=6736 http://127.0.0.1:16736
 ```
 
 3. **Android アプリ側で登録する**:
-   - プロバイダー追加 → **「PC版 OpenTokenUsage 同期」** を選択
-   - **PC版 OpenTokenUsage URL**: `https://<あなたの端末名>.ts.net:6736`
+   - プロバイダー追加 → **「デスクトップデータ」** を選択
+   - **デスクトップ版 OpenTokenUsage URL**: `https://<あなたの端末名>.ts.net:6736`
    - **認証トークン（設定している場合のみ・任意）**: 手順 1 で設定した `<任意のトークン>`
 
-※ Android 単体で完結するプロバイダー（OpenRouter / Claude / Codex / Cursor 等）のみを使う場合、PC 同期および Tailscale は不要です。
+※ Android 単体で完結するプロバイダー（OpenRouter / Claude / Codex / Cursor 等）のみを使う場合、デスクトップ連携および Tailscale は不要です。

@@ -13,8 +13,8 @@ android {
         applicationId = "com.opentokenusage.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.1"
 
         val agyClientId = providers.gradleProperty("antigravityOAuthClientId")
             .orElse(providers.environmentVariable("ANTIGRAVITY_OAUTH_CLIENT_ID"))

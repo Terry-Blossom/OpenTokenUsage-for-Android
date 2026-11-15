@@ -179,7 +179,7 @@ fun ProviderDetailScreen(
                     border = BorderStroke(1.dp, colors.border),
                 ) {
                     Text(
-                        text = "PC版 OpenTokenUsage から同期されたデータです。",
+                        text = "デスクトップアプリから取り込んだデータです。",
                         color = colors.textSecondary,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(12.dp),

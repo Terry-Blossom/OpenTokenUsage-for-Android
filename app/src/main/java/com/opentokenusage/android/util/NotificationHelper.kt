@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -16,10 +17,11 @@ import com.opentokenusage.android.MainActivity
 import com.opentokenusage.android.R
 import com.opentokenusage.android.domain.logic.PaceCalculator
 import com.opentokenusage.android.domain.logic.PaceTier
-import com.opentokenusage.android.domain.logic.UsageDisplayFormatter
 import com.opentokenusage.android.domain.model.AppSettings
 import com.opentokenusage.android.domain.model.MetricLine
 import com.opentokenusage.android.domain.model.ProviderSnapshot
+import com.opentokenusage.android.domain.model.ProviderId
+import com.opentokenusage.android.ui.theme.ProviderVisuals
 import kotlin.math.roundToInt
 
 class NotificationHelper(private val context: Context) {
@@ -54,7 +56,6 @@ class NotificationHelper(private val context: Context) {
     fun updatePersistentNotification(
         snapshots: List<ProviderSnapshot>,
         settings: AppSettings,
-        nowMs: Long = System.currentTimeMillis(),
     ) {
         if (!settings.persistentNotificationEnabled || snapshots.isEmpty()) {
             cancelPersistentNotification()
@@ -66,32 +67,36 @@ class NotificationHelper(private val context: Context) {
             val line = snapshot.overviewLines()
                 .filterIsInstance<MetricLine.Progress>()
                 .minByOrNull { it.primaryOrder ?: Int.MAX_VALUE }
-            when {
-                line != null -> {
-                    val pct = (line.usedFraction * 100.0).roundToInt()
-                    val staleSuffix = if (snapshot.isStale) "（更新失敗）" else ""
-                    "${notificationLabel(snapshot)}: 使用 $pct%$staleSuffix"
-                }
-                !snapshot.errorMessage.isNullOrBlank() -> "${notificationLabel(snapshot)}: 取得エラー"
-                else -> null
-            }
-        }
+            line?.let { snapshot to it }
+        }.distinctBy { (snapshot, _) -> snapshot.providerId }.take(MAX_STATUS_PROVIDERS)
         if (rows.isEmpty()) {
             cancelPersistentNotification()
             return
         }
 
-        val preview = buildString {
-            append(rows.take(3).joinToString(" · "))
-            if (rows.size > 3) append(" ほか${rows.size - 3}件")
+        val remoteViews = RemoteViews(context.packageName, R.layout.notification_usage_strip)
+        val slots = listOf(
+            Triple(R.id.usage_slot_1, R.id.usage_icon_1, R.id.usage_percent_1),
+            Triple(R.id.usage_slot_2, R.id.usage_icon_2, R.id.usage_percent_2),
+            Triple(R.id.usage_slot_3, R.id.usage_icon_3, R.id.usage_percent_3),
+        )
+        rows.forEachIndexed { index, (snapshot, line) ->
+            val (slotId, iconId, percentId) = slots[index]
+            val provider = ProviderId.fromId(snapshot.providerId)
+            remoteViews.setViewVisibility(slotId, android.view.View.VISIBLE)
+            remoteViews.setImageViewResource(iconId, ProviderVisuals.iconRes(snapshot.providerId))
+            remoteViews.setInt(iconId, "setColorFilter", (provider?.brandColorRgb ?: 0xFF9CA3AF).toInt())
+            remoteViews.setTextViewText(percentId, "${(line.usedFraction * 100.0).roundToInt()}%")
         }
-        val updatedAtMs = snapshots.maxOfOrNull { it.fetchedAtMs }?.takeIf { it > 0L } ?: nowMs
+        val preview = rows.joinToString(" · ") { (snapshot, line) ->
+            "${snapshot.displayName} ${(line.usedFraction * 100.0).roundToInt()}%"
+        }
         val notification = NotificationCompat.Builder(context, CHANNEL_STATUS)
             .setSmallIcon(R.drawable.ic_stat_usage)
-            .setContentTitle("使用量")
+            .setContentTitle("OpenTokenUsage")
             .setContentText(preview)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(rows.joinToString("\n")))
-            .setSubText("更新 ${UsageDisplayFormatter.formatTimeHm(updatedAtMs, settings.clock24h)}")
+            .setCustomContentView(remoteViews)
+            .setStyle(NotificationCompat.DecoratedCustomViewStyle())
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -107,13 +112,6 @@ class NotificationHelper(private val context: Context) {
     fun cancelPersistentNotification() {
         runCatching { NotificationManagerCompat.from(context).cancel(PERSISTENT_ID) }
     }
-
-    private fun notificationLabel(snapshot: ProviderSnapshot): String =
-        if (snapshot.accountLabel.isBlank()) {
-            snapshot.displayName
-        } else {
-            "${snapshot.displayName} (${snapshot.accountLabel})"
-        }
 
     /**
      * Evaluates threshold, pace, and reset notifications and deduplicates across refreshes
@@ -236,5 +234,6 @@ class NotificationHelper(private val context: Context) {
         const val CHANNEL_ALERTS = "usage_alerts"
         const val CHANNEL_STATUS = "usage_status"
         private const val PERSISTENT_ID = 1201
+        private const val MAX_STATUS_PROVIDERS = 3
     }
 }
