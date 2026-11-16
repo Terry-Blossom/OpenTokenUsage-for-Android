@@ -51,7 +51,7 @@ object CredentialInputParser {
                 return ParsedCredentialInput(
                     secret = AccountSecret(
                         apiKey = apiKeyMatch.groupValues[1].trim(),
-                        syncBearerToken = urlMatch?.groupValues?.getOrNull(1)?.trim().orEmpty(),
+                        apiServerUrl = urlMatch?.groupValues?.getOrNull(1)?.trim().orEmpty(),
                     ),
                     detectedNote = "TOML から Devin credentials を抽出しました",
                 )
@@ -70,12 +70,6 @@ object CredentialInputParser {
                     expiresAtMs = decodeJwtExpiryMs(access),
                 ),
                 detectedNote = "Cursor Session Token を認識しました",
-            )
-        }
-
-        if (providerId == ProviderId.DESKTOP_SYNC) {
-            return ParsedCredentialInput(
-                secret = AccountSecret(syncBearerToken = raw),
             )
         }
 

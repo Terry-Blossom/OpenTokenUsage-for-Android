@@ -1,6 +1,7 @@
 package com.opentokenusage.android.domain.model
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
 
 @Serializable
 enum class MiniMaxRegion(val label: String, val baseUrl: String) {
@@ -35,5 +36,6 @@ data class AccountSecret(
     val sessionCookie: String = "",
     val profileArn: String = "",
     val awsRegion: String = "us-east-1",
-    val syncBearerToken: String = "",
+    // Preserve Devin's saved api_server_url under the former serialized property name.
+    @SerialName("syncBearerToken") val apiServerUrl: String = "",
 )

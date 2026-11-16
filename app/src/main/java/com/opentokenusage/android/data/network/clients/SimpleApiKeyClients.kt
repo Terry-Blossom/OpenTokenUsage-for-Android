@@ -457,7 +457,14 @@ class OpenCodeGoClient(
         val usage = root.objOrNull("usage") ?: root
         val lines = mutableListOf<MetricLine>()
 
-        fun addWindow(keyName: String, label: String, periodMs: Long, order: Int?, isWeekly: Boolean = false) {
+        fun addWindow(
+            keyName: String,
+            label: String,
+            periodMs: Long,
+            order: Int?,
+            scope: String = "overview",
+            isWeekly: Boolean = false,
+        ) {
             val w = usage.objOrNull(keyName) ?: return
             val pct = w.doubleOrNull("percent") ?: return
             lines += MetricLine.Progress(
@@ -469,12 +476,13 @@ class OpenCodeGoClient(
                 periodDurationMs = periodMs,
                 primaryOrder = order,
                 period = if (isWeekly) "weekly" else null,
+                scope = scope,
             )
         }
 
-        addWindow("rolling", "Rolling (5h)", 5L * 3600_000L, 1)
-        addWindow("weekly", "Weekly (7d)", 7L * 24L * 3600_000L, 2, isWeekly = true)
-        addWindow("monthly", "Monthly (30d)", 30L * 24L * 3600_000L, null)
+        addWindow("rolling", "Session", 5L * 3600_000L, 1)
+        addWindow("weekly", "Weekly", 7L * 24L * 3600_000L, 2, isWeekly = true)
+        addWindow("monthly", "Monthly", 30L * 24L * 3600_000L, null, scope = "detail")
 
         if (lines.isEmpty()) throw ProviderProbeException("OpenCode Go の利用枠が見つかりません")
         return ProbeResult(plan = "Go", lines = lines)
@@ -557,7 +565,7 @@ class DevinClient(
         val base = overrides.resolve(
             "devin",
             account.customHost.takeIf { it.startsWith("http") }
-                ?: secret.syncBearerToken.takeIf { it.startsWith("http") }
+                ?: secret.apiServerUrl.takeIf { it.startsWith("http") }
                 ?: "https://server.codeium.com",
         )
         val payload = buildJsonObject {

@@ -5,15 +5,12 @@ import com.opentokenusage.android.domain.model.AccountSecret
 import com.opentokenusage.android.domain.model.ConfiguredAccount
 import com.opentokenusage.android.domain.model.MetricLine
 import com.opentokenusage.android.domain.model.ProviderId
-import com.opentokenusage.android.domain.model.ProviderSnapshot
 import okhttp3.OkHttpClient
 
 data class ProbeResult(
     val plan: String? = null,
     val lines: List<MetricLine> = emptyList(),
     val updatedSecret: AccountSecret? = null,
-    /** Set by DesktopSyncClient when PC OpenTokenUsage /v1/usage returns individual provider snapshots. */
-    val desktopSyncedSnapshots: List<ProviderSnapshot>? = null,
 )
 
 /**
@@ -58,8 +55,6 @@ class ProviderClientRegistry(
         ProviderId.FACTORY.id to FactoryClient(httpClient, overrides),
         ProviderId.KIRO.id to KiroClient(httpClient, overrides),
         ProviderId.ANTIGRAVITY.id to AntigravityClient(httpClient, overrides),
-        ProviderId.DESKTOP_SYNC.id to DesktopSyncClient(httpClient, overrides),
-        ProviderId.JETBRAINS_AI_ASSISTANT.id to JetBrainsSyncHintClient(httpClient),
     )
 
     fun clientFor(providerId: String): ProviderClient =

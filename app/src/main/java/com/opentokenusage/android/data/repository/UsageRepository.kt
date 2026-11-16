@@ -87,12 +87,34 @@ class UsageRepository(
         if (initialized) return
         initMutex.withLock {
             if (initialized) return
-            _accounts.value = stores.loadAccounts()
-            _snapshots.value = stores.loadSnapshots()
+            val savedAccounts = stores.loadAccounts()
+            val removedDesktopAccounts = savedAccounts.filter { it.providerId in LEGACY_DESKTOP_PROVIDER_IDS }
+            _accounts.value = savedAccounts.filterNot { it.providerId in LEGACY_DESKTOP_PROVIDER_IDS }
+            val savedSnapshots = stores.loadSnapshots()
+            _snapshots.value = savedSnapshots.filter { (id, snapshot) ->
+                !id.startsWith("sync_") && snapshot.providerId !in LEGACY_DESKTOP_PROVIDER_IDS
+            }
+            val removedSnapshotIds = savedSnapshots.keys - _snapshots.value.keys
             _settings.value = stores.loadSettings()
             _history.value = stores.loadHistory()
             _fxRates.value = stores.loadFxCache().rates
             _lastSyncMs.value = _snapshots.value.values.maxOfOrNull { it.fetchedAtMs }
+            if (removedDesktopAccounts.isNotEmpty() || removedSnapshotIds.isNotEmpty()) {
+                stores.saveAccounts(_accounts.value)
+                stores.saveSnapshots(_snapshots.value)
+                for (account in removedDesktopAccounts) {
+                    secretsStore.deleteSecret(account.id)
+                    gateStore.clear(account.id)
+                    stores.deleteAccountHistory(account.id)
+                }
+                val removedAccountIds = removedDesktopAccounts.map { it.id }.toSet() + removedSnapshotIds
+                val staleWidgetIds = stores.loadWidgetBindings()
+                    .filterValues { it in removedAccountIds || it.startsWith("sync_") }
+                    .keys
+                    .toIntArray()
+                if (staleWidgetIds.isNotEmpty()) stores.removeWidgetBindings(staleWidgetIds)
+                UsageRefreshScheduler.syncSchedule(context, _settings.value, hasAccounts = _accounts.value.isNotEmpty())
+            }
             initialized = true
         }
         runCatching {
@@ -238,9 +260,6 @@ class UsageRepository(
 
         val currentSnaps = _snapshots.value.toMutableMap()
         currentSnaps.remove(accountId)
-        // Also remove virtual desktop-synced snapshots owned by this hub
-        val syncPrefix = "sync_${accountId}_"
-        currentSnaps.keys.filter { it.startsWith(syncPrefix) }.forEach { currentSnaps.remove(it) }
         _snapshots.value = currentSnaps
         stores.saveSnapshots(currentSnaps)
 
@@ -361,15 +380,6 @@ class UsageRepository(
         val previous = currentMap[account.id]
         currentMap[account.id] = snap
 
-        // Handle desktop-synced individual provider snapshots cleanly
-        if (result.desktopSyncedSnapshots != null) {
-            val syncPrefix = "sync_${account.id}_"
-            currentMap.keys.filter { it.startsWith(syncPrefix) }.forEach { currentMap.remove(it) }
-            for (synced in result.desktopSyncedSnapshots) {
-                currentMap[synced.accountId] = synced
-            }
-        }
-
         _snapshots.value = currentMap
         stores.saveSnapshots(currentMap)
 
@@ -393,15 +403,6 @@ class UsageRepository(
             dedupeMap = currentAlerts.lastAlertKeys,
             nowMs = nowMs,
         )
-        result.desktopSyncedSnapshots?.forEach { sub ->
-            updatedDedupe = notificationHelper.evaluateAndNotify(
-                previous = null,
-                current = sub,
-                settings = _settings.value,
-                dedupeMap = updatedDedupe,
-                nowMs = nowMs,
-            )
-        }
         if (updatedDedupe != currentAlerts.lastAlertKeys) {
             stores.saveAlertState(AlertDedupeState(updatedDedupe))
         }
@@ -450,41 +451,20 @@ class UsageRepository(
         }
     }
 
-    /** Returns ordered list of display snapshots (including Desktop Sync children right after their hub). */
+    /** Returns enabled accounts in their configured display order. */
     fun orderedDisplaySnapshots(): List<ProviderSnapshot> {
         val accountsList = _accounts.value.sortedBy { it.sortOrder }.filter { it.enabled }
         val snapMap = _snapshots.value
-        val result = mutableListOf<ProviderSnapshot>()
-        for (acc in accountsList) {
-            val provider = ProviderId.fromId(acc.providerId)
-            if (acc.providerId == ProviderId.DESKTOP_SYNC.id) {
-                val syncPrefix = "sync_${acc.id}_"
-                val children = snapMap.entries
-                    .filter { it.key.startsWith(syncPrefix) }
-                    .sortedBy { it.value.displayName }
-                    .map { it.value }
-                if (children.isNotEmpty()) {
-                    result.addAll(children)
-                } else {
-                    result += snapMap[acc.id] ?: ProviderSnapshot(
-                        accountId = acc.id,
-                        providerId = acc.providerId,
-                        displayName = provider?.displayName ?: acc.providerId,
-                        accountLabel = acc.label,
-                        fetchedAtMs = 0L,
-                    )
-                }
-            } else {
-                result += snapMap[acc.id] ?: ProviderSnapshot(
-                    accountId = acc.id,
-                    providerId = acc.providerId,
-                    displayName = provider?.displayName ?: acc.providerId,
-                    accountLabel = acc.label,
-                    fetchedAtMs = 0L,
-                )
-            }
+        return accountsList.map { account ->
+            val provider = ProviderId.fromId(account.providerId)
+            snapMap[account.id] ?: ProviderSnapshot(
+                accountId = account.id,
+                providerId = account.providerId,
+                displayName = provider?.displayName ?: account.providerId,
+                accountLabel = account.label,
+                fetchedAtMs = 0L,
+            )
         }
-        return result
     }
 
     fun refreshAsync(isManual: Boolean) {
@@ -497,5 +477,9 @@ class UsageRepository(
         runCatching {
             notificationHelper.updatePersistentNotification(orderedDisplaySnapshots(), _settings.value)
         }
+    }
+
+    private companion object {
+        val LEGACY_DESKTOP_PROVIDER_IDS = setOf("desktop-sync", "jetbrains-ai-assistant")
     }
 }

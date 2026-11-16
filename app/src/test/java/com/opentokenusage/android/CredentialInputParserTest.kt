@@ -59,6 +59,6 @@ class CredentialInputParserTest {
         """.trimIndent()
         val parsed = CredentialInputParser.parse(ProviderId.DEVIN, toml)
         assertEquals("sk-ws-devin-123", parsed.secret.apiKey)
-        assertEquals("https://server.codeium.com", parsed.secret.syncBearerToken)
+        assertEquals("https://server.codeium.com", parsed.secret.apiServerUrl)
     }
 }
