@@ -220,6 +220,8 @@ class AntigravityOAuthTest {
         val body = refreshRequest.body.readUtf8()
         assertTrue(body.contains("client_id=runtime-client-id"))
         assertTrue(body.contains("client_secret=runtime-client-secret"))
+        val loadRequest = server.takeRequest()
+        assertEquals(AntigravityOAuthConfig.ANTIGRAVITY_USER_AGENT, loadRequest.getHeader("User-Agent"))
         assertEquals("ya29.refreshed", result.updatedSecret?.accessToken)
     }
 
