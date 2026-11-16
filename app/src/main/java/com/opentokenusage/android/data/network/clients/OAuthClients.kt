@@ -609,19 +609,34 @@ class AntigravityClient(
         val reqBody = if (projectId != null) """{"project":"$projectId"}""" else "{}"
 
         val summaryBodies = mutableListOf<JsonObject>()
-        var authFailed = false
+        val authErrors = mutableListOf<Pair<Int, String?>>()
         for (h in hosts) {
             val r = runCatching { ProviderHttpSupport.postJson(http, "$h/v1internal:retrieveUserQuotaSummary", reqBody, authHeaders) }.getOrNull() ?: continue
             if (r.statusCode == 401 || r.statusCode == 403) {
-                authFailed = true
+                val detail = ProviderHttpSupport.tryParseObject(r.bodyText)
+                    ?.let { it.objOrNull("error")?.strOrNull("message") ?: it.strOrNull("message") }
+                authErrors += r.statusCode to detail
                 continue
             }
             if (r.statusCode in 200..299) {
                 ProviderHttpSupport.tryParseObject(r.bodyText)?.let { summaryBodies += it }
             }
         }
-        if (summaryBodies.isEmpty() && authFailed) {
-            throw ProviderProbeException("Antigravity の Google OAuth セッションが期限切れです", isAuthError = true)
+        if (summaryBodies.isEmpty() && authErrors.isNotEmpty()) {
+            val statuses = authErrors.map { it.first }
+            if (statuses.all { it == 401 }) {
+                throw ProviderProbeException("Antigravity の Google OAuth セッションが期限切れです", isAuthError = true, statusCode = 401)
+            }
+            val detail = authErrors.firstNotNullOfOrNull { it.second }
+                ?.take(160)
+                ?.takeIf { it.isNotBlank() }
+                ?.let { " $it" }
+                .orEmpty()
+            throw ProviderProbeException(
+                "Antigravity の利用枠を取得できません (HTTP ${statuses.distinct().joinToString("/")})。$detail".trimEnd(),
+                isAuthError = true,
+                statusCode = statuses.first(),
+            )
         }
 
         val lines = parseSummaryBuckets(summaryBodies).toMutableList()

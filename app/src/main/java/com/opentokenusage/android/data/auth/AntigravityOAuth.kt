@@ -34,8 +34,9 @@ object AntigravityOAuthConfig {
     const val DEFAULT_PROD_ENDPOINT = "https://cloudcode-pa.googleapis.com"
 
     const val GEMINI_CLI_USER_AGENT = "google-api-nodejs-client/9.15.1"
-    const val ANTIGRAVITY_USER_AGENT = "antigravity/2.31.1 (aidev_client; os_type=android; arch=arm64)"
-    const val ANTIGRAVITY_ONBOARD_USER_AGENT = "antigravity/hub/2.24.0 (aidev_client; os_type=android; arch=arm64; cl=1000335682) google-api-nodejs-client/10.3.0"
+    // Cloud Code detects the product from the User-Agent; an unrecognized OS token can 403.
+    const val ANTIGRAVITY_USER_AGENT = "antigravity/2.31.1 (aidev_client; os_type=windows; arch=amd64)"
+    const val ANTIGRAVITY_ONBOARD_USER_AGENT = "antigravity/hub/2.24.0 (aidev_client; os_type=windows; arch=amd64; cl=1000335682) google-api-nodejs-client/10.3.0"
     const val ANTIGRAVITY_GOOG_API_CLIENT = "gl-node/22.21.1"
     const val ANTIGRAVITY_IDE_VERSION = "2.24.0"
 
