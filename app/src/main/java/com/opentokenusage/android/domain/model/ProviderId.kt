@@ -40,7 +40,7 @@ enum class ProviderId(
         brandColorRgb = 0xFF2563EB,
         authMode = ProviderAuthMode.SESSION_OR_OAUTH,
         keyHelpUrl = "https://cursor.com/settings",
-        localFileHint = "cursorAuth/accessToken または WorkosCursorSessionToken Cookie",
+        localFileHint = "Cursor API Key (crsr_...)、cursorAuth/accessToken、または WorkosCursorSessionToken Cookie",
     ),
     COPILOT(
         id = "copilot",
@@ -123,7 +123,7 @@ enum class ProviderId(
         brandColorRgb = 0xFF6B7280,
         authMode = ProviderAuthMode.OAUTH_OR_JSON,
         keyHelpUrl = "https://accounts.x.ai",
-        localFileHint = "~/.grok/auth.json",
+        localFileHint = "~/.grok/auth.json または Cursor API Key (crsr_...)",
     ),
     MUSE(
         id = "muse",

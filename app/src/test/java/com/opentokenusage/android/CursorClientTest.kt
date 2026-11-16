@@ -40,6 +40,36 @@ class CursorClientTest {
     )
 
     @Test
+    fun exchangesCursorApiKeyBeforeReadingUsage() = runTest {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"accessToken":"cursor-session","refreshToken":"cursor-refresh"}""",
+            ),
+        )
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"billingCycleStart":"2026-10-18T06:32:13Z","billingCycleEnd":"2026-10-25T06:32:13Z","planUsage":{"totalPercentUsed":24}}""",
+            ),
+        )
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"isMerged":true,"planInfo":{"planName":"Premium"}}""",
+            ),
+        )
+
+        val result = client().probe(
+            ConfiguredAccount("c1", ProviderId.CURSOR.id),
+            AccountSecret(apiKey = "crsr_test_key"),
+        )
+
+        val exchange = server.takeRequest()
+        assertEquals("/auth/exchange_user_api_key", exchange.path)
+        assertEquals("Bearer crsr_test_key", exchange.getHeader("Authorization"))
+        assertEquals("cursor-session", result.updatedSecret?.accessToken)
+        assertEquals(24.0, (result.lines.single() as MetricLine.Progress).used, 0.01)
+    }
+
+    @Test
     fun xPlanShowsOnlyTotalUsage() = runTest {
         server.enqueue(
             MockResponse().setResponseCode(200).setBody(

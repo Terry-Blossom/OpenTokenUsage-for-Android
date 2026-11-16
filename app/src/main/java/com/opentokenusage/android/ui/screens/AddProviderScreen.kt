@@ -139,10 +139,11 @@ fun AddProviderScreen(
                                 )
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(p.displayName, color = colors.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                                    val sub = when (p.authMode) {
-                                        ProviderAuthMode.API_KEY -> "APIキーで接続"
-                                        ProviderAuthMode.OAUTH_OR_JSON -> "OAuthトークン / 認証JSON"
-                                        ProviderAuthMode.SESSION_OR_OAUTH -> "Access Token / Session Cookie"
+                                    val sub = when {
+                                        p == ProviderId.CURSOR || p == ProviderId.GROK -> "crsr_ APIキー / トークン"
+                                        p.authMode == ProviderAuthMode.API_KEY -> "APIキーで接続"
+                                        p.authMode == ProviderAuthMode.OAUTH_OR_JSON -> "OAuthトークン / 認証JSON"
+                                        else -> "Access Token / Session Cookie"
                                     }
                                     Text(sub, color = colors.textMuted, fontSize = 11.sp)
                                 }
@@ -337,8 +338,9 @@ private fun ProviderCredentialForm(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = when (provider.authMode) {
-                            ProviderAuthMode.API_KEY -> "API キー"
+                        text = when {
+                            provider == ProviderId.CURSOR || provider == ProviderId.GROK -> "API キー（crsr_...）/ トークン または 認証JSON"
+                            provider.authMode == ProviderAuthMode.API_KEY -> "API キー"
                             else -> "トークン または 認証JSON"
                         },
                         color = colors.textSecondary,
@@ -363,7 +365,11 @@ private fun ProviderCredentialForm(
                     onValueChange = { primaryInput = it },
                     placeholder = {
                         Text(
-                            "sk-... / Bearer Token / 認証JSON全体",
+                            if (provider == ProviderId.CURSOR || provider == ProviderId.GROK) {
+                                "crsr_... / Bearer Token / 認証JSON全体"
+                            } else {
+                                "sk-... / Bearer Token / 認証JSON全体"
+                            },
                             fontSize = 12.sp,
                         )
                     },
