@@ -45,3 +45,22 @@ app/build/outputs/apk/debug/app-debug.apk
 
 - `antigravityOAuthClientId` / `ANTIGRAVITY_OAUTH_CLIENT_ID`
 - `antigravityOAuthClientSecret` / `ANTIGRAVITY_OAUTH_CLIENT_SECRET`
+
+### Antigravity の OAuth クライアント資格情報の取得方法
+
+独自の Google Cloud OAuth クライアントを新規作成しないでください。Cloud Code Private API は Antigravity 自身のプロジェクトでのみ有効化されており、独自クライアントでは `403 Cloud Code Private API has not been used in project ...` になります。代わりに、インストール済み Antigravity アプリに埋め込まれた OAuth クライアント資格情報を使用してください。
+
+インストール済み Antigravity から抽出します（パスは環境に合わせて調整）:
+
+```powershell
+# Client ID（app.asar と language_server.exe に含まれます）
+Select-String -Path "C:\Users\<you>\AppData\Local\Programs\antigravity\resources\app.asar" -Pattern "apps\.googleusercontent\.com" | Select-Object -First 1
+
+# Client Secret（language_server.exe に含まれます）
+$exe = "C:\Users\<you>\AppData\Local\Programs\antigravity\resources\bin\language_server.exe"
+$bytes = [System.IO.File]::ReadAllBytes($exe)
+$text = [System.Text.Encoding]::ASCII.GetString($bytes)
+[regex]::Matches($text, "GOCSPX-[A-Za-z0-9_-]+") | Select-Object -ExpandProperty Value -Unique
+```
+
+バイナリ内で Antigravity のクライアント ID の近くに現れる値を使用してください。両方の値を「プロバイダー追加 → Antigravity」に入力して保存し、「Google でログイン」をタップします。
