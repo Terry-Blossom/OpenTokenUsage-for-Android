@@ -3,6 +3,7 @@ package com.opentokenusage.android
 import com.opentokenusage.android.data.network.clients.AmpClient
 import com.opentokenusage.android.data.network.clients.AntigravityClient
 import com.opentokenusage.android.data.network.clients.DeepSeekClient
+import com.opentokenusage.android.data.network.clients.GrokClient
 import com.opentokenusage.android.data.network.clients.MiniMaxClient
 import com.opentokenusage.android.data.network.clients.OpenCodeGoClient
 import com.opentokenusage.android.data.network.clients.ProviderEndpointOverrides
@@ -124,6 +125,31 @@ class MoreClientsAndFormattersTest {
         val amp = AmpClient(http, ProviderEndpointOverrides(mapOf("amp" to baseUrl)))
             .probe(ConfiguredAccount("a1", ProviderId.AMP.id), AccountSecret(apiKey = "amp"))
         assertEquals(2.0, (amp.lines[0] as MetricLine.Progress).used, 0.01)
+    }
+
+    @Test
+    fun grokAcceptsCursorApiKeyForGrokBotWeeklyUsage() = runTest {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"accessToken":"cursor-session","refreshToken":"cursor-refresh"}""",
+            ),
+        )
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"usagePercent":41.5,"hasNonZeroIncludedLimit":true,"nextResetTimestampUtc":"2026-11-20T00:00:00Z"}""",
+            ),
+        )
+
+        val result = GrokClient(http, ProviderEndpointOverrides(mapOf("cursor" to baseUrl))).probe(
+            ConfiguredAccount("g1", ProviderId.GROK.id),
+            AccountSecret(apiKey = "crsr_test_key"),
+        )
+
+        assertEquals("Grok Bot", result.plan)
+        val weekly = result.lines.single() as MetricLine.Progress
+        assertEquals("Grok Bot", weekly.label)
+        assertEquals(41.5, weekly.used, 0.01)
+        assertEquals("weekly", weekly.period)
     }
 
     @Test

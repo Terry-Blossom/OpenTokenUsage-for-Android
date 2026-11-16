@@ -140,6 +140,9 @@ class GrokClient(
     private val overrides: ProviderEndpointOverrides,
 ) : ProviderClient {
     override suspend fun probe(account: ConfiguredAccount, secret: AccountSecret, nowMs: Long): ProbeResult {
+        val cursorApiKey = secret.apiKey.trim().takeIf { it.startsWith("crsr_") }
+        if (cursorApiKey != null) return probeCursorGrokBot(secret, cursorApiKey, nowMs)
+
         var cur = secret
         var access = cur.accessToken.trim()
         val refresh = cur.refreshToken.trim()
@@ -208,6 +211,69 @@ class GrokClient(
         val plan = data.strOrNull("tier") ?: data.strOrNull("plan")
         if (lines.isEmpty()) throw ProviderProbeException("Grok の利用情報が見つかりません")
         return ProbeResult(plan = plan, lines = lines, updatedSecret = updated)
+    }
+
+    private suspend fun probeCursorGrokBot(
+        secret: AccountSecret,
+        cursorApiKey: String,
+        nowMs: Long,
+    ): ProbeResult {
+        val base = overrides.resolve("cursor", "https://api2.cursor.sh")
+        var currentSecret = secret
+        var accessToken = currentSecret.accessToken.trim()
+        var updatedSecret: AccountSecret? = null
+        val expiresAt = currentSecret.expiresAtMs ?: CredentialInputParser.decodeJwtExpiryMs(accessToken)
+        if (accessToken.isEmpty() || (expiresAt != null && nowMs >= expiresAt - 5 * 60_000L)) {
+            currentSecret = exchangeCursorCredential(
+                http,
+                base,
+                currentSecret,
+                currentSecret.refreshToken.ifBlank { cursorApiKey },
+            )
+            updatedSecret = currentSecret
+            accessToken = currentSecret.accessToken
+        }
+
+        suspend fun fetchGrokBotUsage(token: String) = ProviderHttpSupport.postJson(
+            http,
+            "$base/aiserver.v1.DashboardService/GetSandUsageStatus",
+            "{}",
+            mapOf("Authorization" to "Bearer $token", "Connect-Protocol-Version" to "1", "Accept" to "application/json"),
+        )
+
+        var response = fetchGrokBotUsage(accessToken)
+        if ((response.statusCode == 401 || response.statusCode == 403) && updatedSecret == null) {
+            currentSecret = exchangeCursorCredential(
+                http,
+                base,
+                currentSecret,
+                currentSecret.refreshToken.ifBlank { cursorApiKey },
+            )
+            updatedSecret = currentSecret
+            accessToken = currentSecret.accessToken
+            response = fetchGrokBotUsage(accessToken)
+        }
+        if (response.statusCode == 401 || response.statusCode == 403) {
+            throw ProviderProbeException("Cursor API キー/トークンの認証に失敗しました", isAuthError = true, statusCode = response.statusCode)
+        }
+        if (response.statusCode !in 200..299) {
+            throw ProviderProbeException("Cursor Grok Bot の取得に失敗 (HTTP ${response.statusCode})", statusCode = response.statusCode)
+        }
+        val usage = ProviderHttpSupport.tryParseObject(response.bodyText)
+            ?: throw ProviderProbeException("Cursor Grok Bot のレスポンス解析に失敗しました")
+        val percent = usage.doubleOrNull("usagePercent")
+            ?: throw ProviderProbeException("Cursor Grok Bot の利用率が見つかりません")
+        val line = MetricLine.Progress(
+            label = "Grok Bot",
+            used = percent.coerceIn(0.0, 100.0),
+            limit = 100.0,
+            format = MetricFormat.Percent,
+            resetsAtMs = ProviderHttpSupport.parseDateMs(usage["nextResetTimestampUtc"]),
+            periodDurationMs = 7L * 24L * 3600_000L,
+            primaryOrder = 1,
+            period = "weekly",
+        )
+        return ProbeResult(plan = "Grok Bot", lines = listOf(line), updatedSecret = updatedSecret)
     }
 
     private suspend fun refreshGrok(secret: AccountSecret): AccountSecret {

@@ -137,8 +137,9 @@ class CursorClient(
         var accessToken = secret.accessToken.trim()
         val refreshToken = secret.refreshToken.trim()
         val cookieToken = secret.sessionCookie.trim()
+        val cursorApiKey = secret.apiKey.trim().takeIf { it.startsWith("crsr_") }.orEmpty()
 
-        if (accessToken.isEmpty() && refreshToken.isEmpty() && cookieToken.isEmpty()) {
+        if (accessToken.isEmpty() && refreshToken.isEmpty() && cookieToken.isEmpty() && cursorApiKey.isEmpty()) {
             throw ProviderProbeException("Cursor のトークンまたはセッションCookieが未設定です", isAuthError = true)
         }
 
@@ -147,7 +148,17 @@ class CursorClient(
 
         val expMs = currentSecret.expiresAtMs ?: CredentialInputParser.decodeJwtExpiryMs(accessToken)
         var updatedSecret: AccountSecret? = null
-        if ((accessToken.isEmpty() || (expMs != null && nowMs >= expMs - 5 * 60_000L)) && refreshToken.isNotEmpty()) {
+        val needsRefresh = accessToken.isEmpty() || (expMs != null && nowMs >= expMs - 5 * 60_000L)
+        if (needsRefresh && cursorApiKey.isNotEmpty()) {
+            currentSecret = exchangeCursorCredential(
+                http,
+                api2Base,
+                currentSecret,
+                currentSecret.refreshToken.ifBlank { cursorApiKey },
+            )
+            updatedSecret = currentSecret
+            accessToken = currentSecret.accessToken
+        } else if (needsRefresh && refreshToken.isNotEmpty()) {
             currentSecret = refreshCursor(api2Base, currentSecret)
             updatedSecret = currentSecret
             accessToken = currentSecret.accessToken
@@ -187,8 +198,19 @@ class CursorClient(
 
         if (accessToken.isNotEmpty()) {
             var usageResp = connectPost(api2Base, "/aiserver.v1.DashboardService/GetCurrentPeriodUsage", accessToken)
-            if ((usageResp.statusCode == 401 || usageResp.statusCode == 403) && refreshToken.isNotEmpty() && updatedSecret == null) {
-                currentSecret = refreshCursor(api2Base, currentSecret)
+            if ((usageResp.statusCode == 401 || usageResp.statusCode == 403) &&
+                (refreshToken.isNotEmpty() || cursorApiKey.isNotEmpty()) && updatedSecret == null
+            ) {
+                currentSecret = if (cursorApiKey.isNotEmpty()) {
+                    exchangeCursorCredential(
+                        http,
+                        api2Base,
+                        currentSecret,
+                        currentSecret.refreshToken.ifBlank { cursorApiKey },
+                    )
+                } else {
+                    refreshCursor(api2Base, currentSecret)
+                }
                 updatedSecret = currentSecret
                 accessToken = currentSecret.accessToken
                 usageResp = connectPost(api2Base, "/aiserver.v1.DashboardService/GetCurrentPeriodUsage", accessToken)
@@ -450,4 +472,36 @@ class CursorClient(
         private const val CLIENT_ID = "KbZUR41cY7W6zRSdpSUJ7I7mLYBKOCmB"
         private const val WEEK_MS = 7L * 24L * 3600_000L
     }
+}
+
+internal suspend fun exchangeCursorCredential(
+    http: OkHttpClient,
+    base: String,
+    secret: AccountSecret,
+    credential: String,
+): AccountSecret {
+    val response = ProviderHttpSupport.postJson(
+        http,
+        "$base/auth/exchange_user_api_key",
+        "{}",
+        mapOf("Authorization" to "Bearer $credential", "Accept" to "application/json"),
+    )
+    if (response.statusCode == 401 || response.statusCode == 403) {
+        throw ProviderProbeException("Cursor API キー/トークンの認証に失敗しました", isAuthError = true, statusCode = response.statusCode)
+    }
+    if (response.statusCode !in 200..299) {
+        throw ProviderProbeException("Cursor API キー/トークンの交換に失敗しました (HTTP ${response.statusCode})", statusCode = response.statusCode)
+    }
+    val obj = ProviderHttpSupport.tryParseObject(response.bodyText)
+        ?: throw ProviderProbeException("Cursor API キー/トークン交換レスポンスの解析に失敗しました")
+    val accessToken = obj.strOrNull("accessToken")
+        ?: obj.strOrNull("access_token")
+        ?: obj.strOrNull("token")
+        ?: throw ProviderProbeException("Cursor API キー/トークン交換レスポンスにアクセストークンがありません")
+    val refreshToken = obj.strOrNull("refreshToken") ?: obj.strOrNull("refresh_token")
+    return secret.copy(
+        accessToken = accessToken,
+        refreshToken = refreshToken ?: secret.refreshToken,
+        expiresAtMs = CredentialInputParser.decodeJwtExpiryMs(accessToken),
+    )
 }

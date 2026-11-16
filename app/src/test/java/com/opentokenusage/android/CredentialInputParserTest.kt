@@ -52,6 +52,15 @@ class CredentialInputParserTest {
     }
 
     @Test
+    fun recognizesCursorApiKeysForCursorAndGrok() {
+        for (provider in listOf(ProviderId.CURSOR, ProviderId.GROK)) {
+            val parsed = CredentialInputParser.parse(provider, "crsr_test_key")
+            assertEquals("crsr_test_key", parsed.secret.apiKey)
+            assertEquals("Cursor API キーを認識しました", parsed.detectedNote)
+        }
+    }
+
+    @Test
     fun extractsDevinTomlCredentials() {
         val toml = """
             windsurf_api_key = "sk-ws-devin-123"

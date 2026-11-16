@@ -73,6 +73,13 @@ object CredentialInputParser {
             )
         }
 
+        if (providerId in setOf(ProviderId.CURSOR, ProviderId.GROK) && raw.startsWith("crsr_")) {
+            return ParsedCredentialInput(
+                secret = AccountSecret(apiKey = raw),
+                detectedNote = "Cursor API キーを認識しました",
+            )
+        }
+
         val isApiKey = providerId in setOf(
             ProviderId.OPENROUTER,
             ProviderId.DEEPSEEK,
