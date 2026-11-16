@@ -40,7 +40,8 @@ object ProviderVisuals {
 
     fun iconTint(providerId: String, isDark: Boolean): Color =
         when (providerId.lowercase()) {
-            "codex", "cursor", "devin", "factory", "grok", "kimi", "opencode-go", "synthetic", "zai" ->
+            "grok", "opencode-go" -> Color(0xFF000000)
+            "codex", "cursor", "devin", "factory", "kimi", "synthetic", "zai" ->
                 if (isDark) Color(0xFFF3F4F6) else Color(0xFF18181B)
             else -> barColor(providerId, isDark)
         }
