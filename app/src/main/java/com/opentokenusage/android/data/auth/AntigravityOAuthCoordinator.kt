@@ -82,12 +82,12 @@ class AntigravityOAuthCoordinator(
                 if (callback == null) {
                     // Do not clobber manual completion or explicit cancellation.
                     if (_state.value is AntigravityOAuthUiState.WaitingForBrowser) {
-                        stopActiveWait()
+                        stopActiveWait(cancelWaitJob = false)
                         _state.value = AntigravityOAuthUiState.Error("Google ログインがタイムアウトしました。再度お試しください。")
                     }
                     return@launch
                 }
-                completeWithCallback(callback, request)
+                completeWithCallback(callback, request, cancelWaitJob = false)
             }
         }
     }
@@ -128,8 +128,9 @@ class AntigravityOAuthCoordinator(
     private suspend fun completeWithCallback(
         callback: AntigravityCallbackParams,
         request: AntigravityAuthorizationRequest,
+        cancelWaitJob: Boolean = true,
     ) {
-        stopActiveWait()
+        stopActiveWait(cancelWaitJob)
 
         if (!callback.error.isNullOrBlank()) {
             val detail = callback.errorDescription?.takeIf { it.isNotBlank() } ?: callback.error
@@ -172,8 +173,8 @@ class AntigravityOAuthCoordinator(
         )
     }
 
-    private fun stopActiveWait() {
-        waitJob?.cancel()
+    private fun stopActiveWait(cancelWaitJob: Boolean = true) {
+        if (cancelWaitJob) waitJob?.cancel()
         waitJob = null
         activeServer?.stop()
         activeServer = null
