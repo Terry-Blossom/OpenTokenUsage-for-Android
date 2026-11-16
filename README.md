@@ -45,3 +45,22 @@ You can prefill the fields at build time using `local.properties`, Gradle proper
 
 - `antigravityOAuthClientId` / `ANTIGRAVITY_OAUTH_CLIENT_ID`
 - `antigravityOAuthClientSecret` / `ANTIGRAVITY_OAUTH_CLIENT_SECRET`
+
+### Obtaining Antigravity's OAuth client credentials
+
+Do **not** create your own Google Cloud OAuth client. The Cloud Code Private API is only enabled for Antigravity's own project, so a custom client fails with `403 Cloud Code Private API has not been used in project ...`. Use the OAuth client credentials embedded in the installed Antigravity app instead.
+
+Extract them from the Antigravity installation (adjust the path to your install):
+
+```powershell
+# Client ID (in app.asar and language_server.exe)
+Select-String -Path "C:\Users\<you>\AppData\Local\Programs\antigravity\resources\app.asar" -Pattern "apps\.googleusercontent\.com" | Select-Object -First 1
+
+# Client Secret (in language_server.exe)
+$exe = "C:\Users\<you>\AppData\Local\Programs\antigravity\resources\bin\language_server.exe"
+$bytes = [System.IO.File]::ReadAllBytes($exe)
+$text = [System.Text.Encoding]::ASCII.GetString($bytes)
+[regex]::Matches($text, "GOCSPX-[A-Za-z0-9_-]+") | Select-Object -ExpandProperty Value -Unique
+```
+
+Use the value that appears next to the Antigravity client id in the binary. Enter both values in **Add provider → Antigravity**, save, then tap **Google Login**.
