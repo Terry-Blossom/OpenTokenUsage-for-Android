@@ -760,7 +760,7 @@ class AntigravityClient(
         val clientSecret = oauthClientSecretProvider().trim()
         if (clientId.isBlank() || clientSecret.isBlank()) {
             throw ProviderProbeException(
-                "Google OAuth クライアント設定が未構成のため自動更新できません。再ログインしてください。",
+                "Antigravity の OAuth 設定が未構成です。Antigravity の設定画面で Client ID と Client Secret を保存してください。",
                 isAuthError = true,
             )
         }

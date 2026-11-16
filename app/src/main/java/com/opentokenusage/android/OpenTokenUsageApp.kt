@@ -27,12 +27,18 @@ class AppContainer(application: Application) {
     val secretsStore by lazy { AccountSecretsStore(application, ProviderHttpSupport.json) }
     val gateStore by lazy { RateLimitGateStore(application, ProviderHttpSupport.json) }
     val notificationHelper by lazy { NotificationHelper(application) }
-    val clientRegistry by lazy { ProviderClientRegistry(httpClient) }
     val antigravityOAuthSettings by lazy {
         AntigravityOAuthSettingsStore(
             secretsStore = secretsStore,
             defaultClientId = BuildConfig.ANTIGRAVITY_OAUTH_CLIENT_ID,
             defaultClientSecret = BuildConfig.ANTIGRAVITY_OAUTH_CLIENT_SECRET,
+        )
+    }
+    val clientRegistry by lazy {
+        ProviderClientRegistry(
+            httpClient = httpClient,
+            antigravityOAuthClientIdProvider = { antigravityOAuthSettings.current().clientId },
+            antigravityOAuthClientSecretProvider = { antigravityOAuthSettings.current().clientSecret },
         )
     }
     val antigravityOAuthClient by lazy {
@@ -50,6 +56,7 @@ class AppContainer(application: Application) {
             httpClient = httpClient,
             stores = stores,
             secretsStore = secretsStore,
+            antigravityOAuthSettings = antigravityOAuthSettings,
             gateStore = gateStore,
             clientRegistry = clientRegistry,
             notificationHelper = notificationHelper,

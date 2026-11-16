@@ -2,6 +2,7 @@ package com.opentokenusage.android.data.repository
 
 import android.content.Context
 import androidx.glance.appwidget.updateAll
+import com.opentokenusage.android.data.auth.AntigravityOAuthSettingsStore
 import com.opentokenusage.android.data.network.ProviderHttpSupport
 import com.opentokenusage.android.data.network.ProviderProbeException
 import com.opentokenusage.android.data.network.clients.ProviderClientRegistry
@@ -52,6 +53,7 @@ class UsageRepository(
     private val httpClient: OkHttpClient,
     private val stores: LocalAppStores,
     private val secretsStore: AccountSecretsStore,
+    private val antigravityOAuthSettings: AntigravityOAuthSettingsStore,
     private val gateStore: RateLimitGateStore,
     private val clientRegistry: ProviderClientRegistry,
     private val notificationHelper: NotificationHelper,
@@ -87,6 +89,7 @@ class UsageRepository(
         if (initialized) return
         initMutex.withLock {
             if (initialized) return
+            antigravityOAuthSettings.load()
             val savedAccounts = stores.loadAccounts()
             val removedDesktopAccounts = savedAccounts.filter { it.providerId in LEGACY_DESKTOP_PROVIDER_IDS }
             _accounts.value = savedAccounts.filterNot { it.providerId in LEGACY_DESKTOP_PROVIDER_IDS }
