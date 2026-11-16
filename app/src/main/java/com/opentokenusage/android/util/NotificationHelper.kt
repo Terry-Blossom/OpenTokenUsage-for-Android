@@ -8,15 +8,18 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.os.Build
 import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.ColorUtils
 import com.opentokenusage.android.MainActivity
 import com.opentokenusage.android.R
 import com.opentokenusage.android.domain.logic.PaceCalculator
 import com.opentokenusage.android.domain.logic.PaceTier
+import com.opentokenusage.android.domain.logic.UsageDisplayFormatter
 import com.opentokenusage.android.domain.model.AppSettings
 import com.opentokenusage.android.domain.model.MetricLine
 import com.opentokenusage.android.domain.model.ProviderSnapshot
@@ -64,10 +67,7 @@ class NotificationHelper(private val context: Context) {
         if (!canPostNotifications()) return
 
         val rows = snapshots.mapNotNull { snapshot ->
-            val line = snapshot.overviewLines()
-                .filterIsInstance<MetricLine.Progress>()
-                .minByOrNull { it.primaryOrder ?: Int.MAX_VALUE }
-            line?.let { snapshot to it }
+            statusNotificationLines(snapshot).takeIf { it.isNotEmpty() }?.let { snapshot to it }
         }.distinctBy { (snapshot, _) -> snapshot.providerId }.take(MAX_STATUS_PROVIDERS)
         if (rows.isEmpty()) {
             cancelPersistentNotification()
@@ -76,20 +76,30 @@ class NotificationHelper(private val context: Context) {
 
         val remoteViews = RemoteViews(context.packageName, R.layout.notification_usage_strip)
         val slots = listOf(
-            Triple(R.id.usage_slot_1, R.id.usage_icon_1, R.id.usage_percent_1),
-            Triple(R.id.usage_slot_2, R.id.usage_icon_2, R.id.usage_percent_2),
-            Triple(R.id.usage_slot_3, R.id.usage_icon_3, R.id.usage_percent_3),
+            StatusSlot(R.id.usage_slot_1, R.id.usage_icon_1, R.id.usage_percent_1, R.id.usage_weekly_1),
+            StatusSlot(R.id.usage_slot_2, R.id.usage_icon_2, R.id.usage_percent_2, R.id.usage_weekly_2),
+            StatusSlot(R.id.usage_slot_3, R.id.usage_icon_3, R.id.usage_percent_3, R.id.usage_weekly_3),
         )
-        rows.forEachIndexed { index, (snapshot, line) ->
-            val (slotId, iconId, percentId) = slots[index]
+        rows.forEachIndexed { index, (snapshot, lines) ->
+            val slot = slots[index]
             val provider = ProviderId.fromId(snapshot.providerId)
-            remoteViews.setViewVisibility(slotId, android.view.View.VISIBLE)
-            remoteViews.setImageViewResource(iconId, ProviderVisuals.iconRes(snapshot.providerId))
-            remoteViews.setInt(iconId, "setColorFilter", (provider?.brandColorRgb ?: 0xFF9CA3AF).toInt())
-            remoteViews.setTextViewText(percentId, "${(line.usedFraction * 100.0).roundToInt()}%")
+            val iconColor = if (snapshot.providerId.lowercase() in BLACK_ICON_PROVIDERS) {
+                Color.BLACK
+            } else {
+                (provider?.brandColorRgb ?: 0xFF9CA3AF).toInt()
+            }
+            remoteViews.setViewVisibility(slot.container, android.view.View.VISIBLE)
+            remoteViews.setImageViewResource(slot.icon, ProviderVisuals.iconRes(snapshot.providerId))
+            remoteViews.setInt(slot.icon, "setColorFilter", iconColor)
+            lines.forEachIndexed { lineIndex, line ->
+                val textId = if (lineIndex == 0) slot.primary else slot.weekly
+                remoteViews.setViewVisibility(textId, android.view.View.VISIBLE)
+                remoteViews.setTextViewText(textId, percentText(line, settings))
+                remoteViews.setTextColor(textId, usageColor(line.usedFraction))
+            }
         }
         val preview = rows.joinToString(" · ") { (snapshot, line) ->
-            "${snapshot.displayName} ${(line.usedFraction * 100.0).roundToInt()}%"
+            "${snapshot.displayName} ${line.joinToString(" / ") { percentText(it, settings) }}"
         }
         val notification = NotificationCompat.Builder(context, CHANNEL_STATUS)
             .setSmallIcon(R.drawable.ic_stat_usage)
@@ -111,6 +121,29 @@ class NotificationHelper(private val context: Context) {
 
     fun cancelPersistentNotification() {
         runCatching { NotificationManagerCompat.from(context).cancel(PERSISTENT_ID) }
+    }
+
+    private fun percentText(line: MetricLine.Progress, settings: AppSettings): String =
+        UsageDisplayFormatter.formatPercentShort(line.used, line.limit, settings.displayMode)
+
+    private fun usageColor(usedFraction: Double): Int {
+        val usedPercent = usedFraction.coerceIn(0.0, 1.0) * 100.0
+        val base = ContextCompat.getColor(context, R.color.notification_text)
+        val stops = listOf(
+            0.0 to base,
+            45.0 to Color.rgb(250, 204, 21),
+            75.0 to Color.rgb(251, 146, 60),
+            92.0 to Color.rgb(239, 68, 68),
+        )
+        for (index in 1 until stops.size) {
+            val (end, endColor) = stops[index]
+            if (usedPercent <= end) {
+                val (start, startColor) = stops[index - 1]
+                val fraction = ((usedPercent - start) / (end - start)).toFloat()
+                return ColorUtils.blendARGB(startColor, endColor, fraction)
+            }
+        }
+        return stops.last().second
     }
 
     /**
@@ -235,5 +268,18 @@ class NotificationHelper(private val context: Context) {
         const val CHANNEL_STATUS = "usage_status"
         private const val PERSISTENT_ID = 1201
         private const val MAX_STATUS_PROVIDERS = 3
+        private val BLACK_ICON_PROVIDERS = setOf("grok", "opencode-go")
     }
+
+    private data class StatusSlot(val container: Int, val icon: Int, val primary: Int, val weekly: Int)
+}
+
+internal fun statusNotificationLines(snapshot: ProviderSnapshot): List<MetricLine.Progress> {
+    val lines = snapshot.overviewLines().filterIsInstance<MetricLine.Progress>()
+    val primary = lines.minByOrNull { it.primaryOrder ?: Int.MAX_VALUE } ?: return emptyList()
+    val weekly = lines.firstOrNull { line ->
+        line != primary && (line.period.equals("weekly", ignoreCase = true) ||
+            (line.periodDurationMs != null && kotlin.math.abs(line.periodDurationMs - 7L * 24L * 3600_000L) < 24L * 3600_000L))
+    }
+    return listOfNotNull(primary, weekly)
 }
