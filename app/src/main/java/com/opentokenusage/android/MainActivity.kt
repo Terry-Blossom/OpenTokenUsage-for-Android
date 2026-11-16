@@ -1,5 +1,6 @@
 package com.opentokenusage.android
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -22,6 +23,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.opentokenusage.android.data.auth.AntigravityOAuthClientSettings
 import com.opentokenusage.android.domain.model.AccountSecret
 import com.opentokenusage.android.domain.model.RefreshIntervalOption
 import com.opentokenusage.android.domain.model.ResetTimerMode
@@ -34,16 +36,24 @@ import com.opentokenusage.android.ui.theme.OpenTokenUsageTheme
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        val repo = (application as OpenTokenUsageApp).container.repository
+        val container = (application as OpenTokenUsageApp).container
+        val repo = container.repository
+        val antigravityOAuth = container.antigravityOAuthCoordinator
 
         setContent {
             val navController = rememberNavController()
             val scope = rememberCoroutineScope()
 
             val accounts by repo.accounts.collectAsStateWithLifecycle()
+            val antigravityOAuthSettings by container.antigravityOAuthSettings.settings.collectAsStateWithLifecycle()
             val snapshots by repo.snapshots.collectAsStateWithLifecycle()
             val settings by repo.settings.collectAsStateWithLifecycle()
             val history by repo.history.collectAsStateWithLifecycle()
@@ -52,6 +62,7 @@ class MainActivity : ComponentActivity() {
             val lastSyncMs by repo.lastSyncMs.collectAsStateWithLifecycle()
 
             LaunchedEffect(Unit) {
+                container.antigravityOAuthSettings.load()
                 repo.initialize()
                 val interval = repo.settings.value.refreshInterval
                 val last = repo.lastSyncMs.value
@@ -133,6 +144,11 @@ class MainActivity : ComponentActivity() {
                                 preselectedProviderId = preselected,
                                 editingAccount = editingAccount,
                                 initialSecret = loadedSecret,
+                                antigravityOAuth = antigravityOAuth,
+                                antigravityOAuthSettings = antigravityOAuthSettings,
+                                onSaveAntigravityOAuthSettings = { id, secret ->
+                                    container.antigravityOAuthSettings.save(id, secret)
+                                },
                                 onTestAndSaveNew = { pid, label, region, host, secret, verify ->
                                     repo.addAccountAndProbe(pid, label, region, host, secret, verify)
                                 },

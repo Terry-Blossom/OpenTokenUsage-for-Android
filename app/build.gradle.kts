@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -13,17 +15,21 @@ android {
         applicationId = "com.opentokenusage.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.1.4"
+        versionCode = 6
+        versionName = "0.1.5"
 
+        val localProps = Properties().apply {
+            val f = rootProject.file("local.properties")
+            if (f.isFile) f.inputStream().use { load(it) }
+        }
         val agyClientId = providers.gradleProperty("antigravityOAuthClientId")
             .orElse(providers.environmentVariable("ANTIGRAVITY_OAUTH_CLIENT_ID"))
-            .getOrElse("")
+            .getOrElse(localProps.getProperty("antigravityOAuthClientId", ""))
         val agyClientSecret = providers.gradleProperty("antigravityOAuthClientSecret")
             .orElse(providers.environmentVariable("ANTIGRAVITY_OAUTH_CLIENT_SECRET"))
-            .getOrElse("")
-        buildConfigField("String", "ANTIGRAVITY_OAUTH_CLIENT_ID", "\"$agyClientId\"")
-        buildConfigField("String", "ANTIGRAVITY_OAUTH_CLIENT_SECRET", "\"$agyClientSecret\"")
+            .getOrElse(localProps.getProperty("antigravityOAuthClientSecret", ""))
+        buildConfigField("String", "ANTIGRAVITY_OAUTH_CLIENT_ID", "\"${agyClientId.replace("\"", "\\\"")}\"")
+        buildConfigField("String", "ANTIGRAVITY_OAUTH_CLIENT_SECRET", "\"${agyClientSecret.replace("\"", "\\\"")}\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

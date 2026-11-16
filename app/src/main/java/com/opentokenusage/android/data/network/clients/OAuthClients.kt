@@ -1,5 +1,7 @@
 package com.opentokenusage.android.data.network.clients
 
+import com.opentokenusage.android.data.auth.AntigravityOAuthClient
+import com.opentokenusage.android.data.auth.AntigravityOAuthConfig
 import com.opentokenusage.android.data.network.ProviderHttpSupport
 import com.opentokenusage.android.data.network.ProviderProbeException
 import com.opentokenusage.android.data.network.arrOrNull
@@ -543,6 +545,8 @@ class KiroClient(
 class AntigravityClient(
     private val http: OkHttpClient,
     private val overrides: ProviderEndpointOverrides,
+    private val oauthClientIdProvider: () -> String = AntigravityOAuthConfig::resolveClientId,
+    private val oauthClientSecretProvider: () -> String = AntigravityOAuthConfig::resolveClientSecret,
 ) : ProviderClient {
     override suspend fun probe(account: ConfiguredAccount, secret: AccountSecret, nowMs: Long): ProbeResult {
         var cur = secret
@@ -559,30 +563,46 @@ class AntigravityClient(
             access = cur.accessToken
         }
 
-        val dailyHost = overrides.resolve("antigravity-daily", "https://daily-cloudcode-pa.googleapis.com")
-        val prodHost = overrides.resolve("antigravity", "https://cloudcode-pa.googleapis.com")
+        val dailyHost = overrides.resolve("antigravity-daily", AntigravityOAuthConfig.DEFAULT_DAILY_ENDPOINT)
+        val prodHost = overrides.resolve("antigravity", AntigravityOAuthConfig.DEFAULT_PROD_ENDPOINT)
         val hosts = listOf(dailyHost, prodHost).distinct()
 
         val headers = mapOf(
             "Authorization" to "Bearer $access",
             "Accept" to "application/json",
-            "User-Agent" to "antigravity/2.31.1 (aidev_client; os_type=android; arch=arm64)",
+            "User-Agent" to AntigravityOAuthConfig.ANTIGRAVITY_USER_AGENT,
         )
+        val loadCodeAssistBody = """{"metadata":{"ideType":"ANTIGRAVITY"}}"""
 
         var assistResp = runCatching {
-            ProviderHttpSupport.postJson(http, "$prodHost/v1internal:loadCodeAssist", "{}", headers)
+            ProviderHttpSupport.postJson(http, "$prodHost/v1internal:loadCodeAssist", loadCodeAssistBody, headers)
         }.getOrNull()
         if (assistResp != null && (assistResp.statusCode == 401 || assistResp.statusCode == 403) && refresh.isNotEmpty() && updated == null) {
             cur = refreshGoogleToken(cur)
             updated = cur
             access = cur.accessToken
             assistResp = runCatching {
-                ProviderHttpSupport.postJson(http, "$prodHost/v1internal:loadCodeAssist", "{}", headers + ("Authorization" to "Bearer $access"))
+                ProviderHttpSupport.postJson(http, "$prodHost/v1internal:loadCodeAssist", loadCodeAssistBody, headers + ("Authorization" to "Bearer $access"))
             }.getOrNull()
         }
 
         val assistJson = assistResp?.takeIf { it.statusCode in 200..299 }?.let { ProviderHttpSupport.tryParseObject(it.bodyText) }
-        val projectId = assistJson?.strOrNull("cloudaicompanionProject")
+        var projectId = AntigravityOAuthClient.extractProjectId(assistJson)
+        if (projectId == null && dailyHost != prodHost) {
+            val dailyAssistResp = runCatching {
+                ProviderHttpSupport.postJson(
+                    http,
+                    "$dailyHost/v1internal:loadCodeAssist",
+                    loadCodeAssistBody,
+                    headers + ("Authorization" to "Bearer $access"),
+                )
+            }.getOrNull()
+            val dailyJson = dailyAssistResp?.takeIf { it.statusCode in 200..299 }?.let { ProviderHttpSupport.tryParseObject(it.bodyText) }
+            projectId = AntigravityOAuthClient.extractProjectId(dailyJson)
+        }
+        if (projectId == null) {
+            projectId = cur.accountId.substringBefore('|').trim().takeIf { it.isNotEmpty() }
+        }
         val plan = readPlanName(assistJson)
 
         val authHeaders = headers + ("Authorization" to "Bearer $access")
@@ -736,18 +756,22 @@ class AntigravityClient(
     }
 
     private suspend fun refreshGoogleToken(secret: AccountSecret): AccountSecret {
-        val clientId = com.opentokenusage.android.BuildConfig.ANTIGRAVITY_OAUTH_CLIENT_ID
-        val clientSecret = com.opentokenusage.android.BuildConfig.ANTIGRAVITY_OAUTH_CLIENT_SECRET
+        val clientId = oauthClientIdProvider().trim()
+        val clientSecret = oauthClientSecretProvider().trim()
         if (clientId.isBlank() || clientSecret.isBlank()) {
             throw ProviderProbeException(
-                "Google OAuth クライアント設定が未構成のため自動更新できません。有効なアクセストークンを入力してください。",
+                "Google OAuth クライアント設定が未構成のため自動更新できません。再ログインしてください。",
                 isAuthError = true,
             )
         }
-        val oauthUrl = overrides.resolve("google-oauth", "https://oauth2.googleapis.com") + "/token"
+        val parts = secret.refreshToken.split('|')
+        val cleanRefresh = parts.firstOrNull()?.trim().orEmpty()
+        val embeddedProject = parts.getOrNull(2)?.trim()?.takeIf { it.isNotEmpty() }
+            ?: parts.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() }
+        val oauthUrl = overrides.resolve("google-oauth", AntigravityOAuthConfig.DEFAULT_OAUTH_BASE_URL) + "/token"
         val form = "client_id=${URLEncoder.encode(clientId, "UTF-8")}" +
             "&client_secret=${URLEncoder.encode(clientSecret, "UTF-8")}" +
-            "&refresh_token=${URLEncoder.encode(secret.refreshToken, "UTF-8")}" +
+            "&refresh_token=${URLEncoder.encode(cleanRefresh, "UTF-8")}" +
             "&grant_type=refresh_token"
         val resp = ProviderHttpSupport.postForm(http, oauthUrl, form)
         if (resp.statusCode == 400 || resp.statusCode == 401 || resp.statusCode == 403) {
@@ -756,7 +780,13 @@ class AntigravityClient(
         if (resp.statusCode !in 200..299) throw ProviderProbeException("Google トークン更新失敗 (HTTP ${resp.statusCode})")
         val obj = ProviderHttpSupport.tryParseObject(resp.bodyText) ?: throw ProviderProbeException("Google トークン更新レスポンス不正")
         val access = obj.strOrNull("access_token") ?: throw ProviderProbeException("Google access_token 欠落")
+        val rotatedRefresh = obj.strOrNull("refresh_token") ?: cleanRefresh
         val exp = (obj.longOrNull("expires_in") ?: 3600L) * 1000L + System.currentTimeMillis()
-        return secret.copy(accessToken = access, expiresAtMs = exp)
+        return secret.copy(
+            accessToken = access,
+            refreshToken = rotatedRefresh,
+            expiresAtMs = exp,
+            accountId = secret.accountId.ifBlank { embeddedProject.orEmpty() },
+        )
     }
 }

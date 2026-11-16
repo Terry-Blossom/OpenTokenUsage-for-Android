@@ -56,8 +56,8 @@ enum class ProviderId(
         displayName = "Antigravity",
         brandColorRgb = 0xFF4285F4,
         authMode = ProviderAuthMode.OAUTH_OR_JSON,
-        keyHelpUrl = "https://idx.dev",
-        localFileHint = "Google OAuth Access Token または Refresh Token",
+        keyHelpUrl = "",
+        localFileHint = "Google ログイン、または OAuth トークン / antigravity-accounts.json",
     ),
     OPENROUTER(
         id = "openrouter",

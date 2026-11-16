@@ -37,9 +37,11 @@ Debug APK output:
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-### Optional: Antigravity OAuth Token Refresh
+### Antigravity Google OAuth Login
 
-OAuth client credentials are not embedded in the repository. To enable automatic Google OAuth refresh for Antigravity, pass Gradle properties or environment variables at build time:
+Open **Add provider → Antigravity**, enter your Google OAuth Client ID and Client Secret, save them, then tap **Google Login**. The credentials are encrypted on-device. The OAuth client must allow the redirect URI shown in the app.
+
+You can prefill the fields at build time using `local.properties`, Gradle properties, or environment variables:
 
 - `antigravityOAuthClientId` / `ANTIGRAVITY_OAUTH_CLIENT_ID`
 - `antigravityOAuthClientSecret` / `ANTIGRAVITY_OAUTH_CLIENT_SECRET`
