@@ -101,10 +101,14 @@ class NotificationHelper(private val context: Context) {
         val preview = rows.joinToString(" · ") { (snapshot, line) ->
             "${snapshot.displayName} ${line.joinToString(" / ") { percentText(it, settings) }}"
         }
+        val updatedAt = snapshots.maxOfOrNull { it.fetchedAtMs }
+            ?.takeIf { it > 0L }
+            ?.let { "更新 ${UsageDisplayFormatter.formatTimeHm(it, settings.clock24h)}" }
         val notification = NotificationCompat.Builder(context, CHANNEL_STATUS)
             .setSmallIcon(R.drawable.ic_stat_usage)
             .setContentTitle("OpenTokenUsage")
             .setContentText(preview)
+            .setSubText(updatedAt)
             .setCustomContentView(remoteViews)
             .setStyle(NotificationCompat.DecoratedCustomViewStyle())
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -129,6 +133,8 @@ class NotificationHelper(private val context: Context) {
     private fun usageColor(usedFraction: Double): Int {
         val usedPercent = usedFraction.coerceIn(0.0, 1.0) * 100.0
         val base = ContextCompat.getColor(context, R.color.notification_text)
+        val lightBackground = ColorUtils.calculateLuminance(base) < 0.5
+        val background = if (lightBackground) Color.WHITE else Color.rgb(32, 33, 36)
         val stops = listOf(
             0.0 to base,
             45.0 to Color.rgb(250, 204, 21),
@@ -140,10 +146,20 @@ class NotificationHelper(private val context: Context) {
             if (usedPercent <= end) {
                 val (start, startColor) = stops[index - 1]
                 val fraction = ((usedPercent - start) / (end - start)).toFloat()
-                return ColorUtils.blendARGB(startColor, endColor, fraction)
+                return readableUsageColor(ColorUtils.blendARGB(startColor, endColor, fraction), background)
             }
         }
-        return stops.last().second
+        return readableUsageColor(stops.last().second, background)
+    }
+
+    private fun readableUsageColor(color: Int, background: Int): Int {
+        if (ColorUtils.calculateContrast(color, background) >= 3.0) return color
+        val target = if (ColorUtils.calculateLuminance(background) > 0.5) Color.BLACK else Color.WHITE
+        for (step in 1..10) {
+            val adjusted = ColorUtils.blendARGB(color, target, step / 10f)
+            if (ColorUtils.calculateContrast(adjusted, background) >= 3.0) return adjusted
+        }
+        return target
     }
 
     /**

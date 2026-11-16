@@ -18,7 +18,6 @@ object ProviderVisuals {
         "devin" -> R.drawable.ic_provider_devin
         "factory" -> R.drawable.ic_provider_factory
         "grok" -> R.drawable.ic_provider_grok
-        "jetbrains-ai-assistant" -> R.drawable.ic_provider_jetbrains_ai_assistant
         "kimi" -> R.drawable.ic_provider_kimi
         "kiro" -> R.drawable.ic_provider_kiro
         "minimax" -> R.drawable.ic_provider_minimax
@@ -27,8 +26,7 @@ object ProviderVisuals {
         "openrouter" -> R.drawable.ic_provider_openrouter
         "synthetic" -> R.drawable.ic_provider_synthetic
         "zai" -> R.drawable.ic_provider_zai
-        "desktop-sync" -> R.drawable.ic_provider_desktop_sync
-        else -> R.drawable.ic_provider_desktop_sync
+        else -> R.drawable.ic_launcher_foreground
     }
 
     fun barColor(providerId: String, isDark: Boolean): Color {

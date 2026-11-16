@@ -143,8 +143,6 @@ fun AddProviderScreen(
                                         ProviderAuthMode.API_KEY -> "APIキーで接続"
                                         ProviderAuthMode.OAUTH_OR_JSON -> "OAuthトークン / 認証JSON"
                                         ProviderAuthMode.SESSION_OR_OAUTH -> "Access Token / Session Cookie"
-                                        ProviderAuthMode.DESKTOP_SYNC_RECOMMENDED -> "デスクトップ版 OpenTokenUsage との連携向け"
-                                        ProviderAuthMode.DESKTOP_SYNC_HUB -> "PC上の複数プロバイダーを一括同期"
                                     }
                                     Text(sub, color = colors.textMuted, fontSize = 11.sp)
                                 }
@@ -188,7 +186,6 @@ private fun ProviderCredentialForm(
     var primaryInput by remember(initialSecret) {
         mutableStateOf(
             when {
-                provider == ProviderId.DESKTOP_SYNC -> initialSecret?.syncBearerToken.orEmpty()
                 !initialSecret?.apiKey.isNullOrBlank() -> initialSecret?.apiKey.orEmpty()
                 else -> initialSecret?.accessToken.orEmpty()
             },
@@ -269,17 +266,12 @@ private fun ProviderCredentialForm(
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         Text(
-                            text = when (provider) {
-                                ProviderId.DESKTOP_SYNC -> "デスクトップ側の設定手順"
-                                else -> "取得元の目安"
-                            },
+                            text = "取得元の目安",
                             color = colors.textPrimary,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                         )
                         val guide = when (provider) {
-                            ProviderId.DESKTOP_SYNC ->
-                                "デスクトップ版 OpenTokenUsage で Local HTTP API (既定 :6736) を有効化し、Tailscale IP 等の URL（例: http://100.x.y.z:6736）を入力してください。"
                             ProviderId.CLAUDE ->
                                 "PCの ${provider.localFileHint} の中身（JSON全体）をそのまま貼り付けると Access / Refresh Token を自動抽出します。"
                             ProviderId.CODEX ->
@@ -316,22 +308,10 @@ private fun ProviderCredentialForm(
                     value = customHost,
                     onValueChange = { customHost = it },
                     label = {
-                        Text(
-                            if (provider == ProviderId.DESKTOP_SYNC || provider == ProviderId.JETBRAINS_AI_ASSISTANT) {
-                                "デスクトップ版 OpenTokenUsage URL"
-                            } else {
-                                "ホスト名"
-                            },
-                        )
+                        Text("ホスト名")
                     },
                     placeholder = {
-                        Text(
-                            if (provider == ProviderId.DESKTOP_SYNC || provider == ProviderId.JETBRAINS_AI_ASSISTANT) {
-                                "http://100.64.0.10:6736"
-                            } else {
-                                "github.com"
-                            },
-                        )
+                        Text("github.com")
                     },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -350,54 +330,46 @@ private fun ProviderCredentialForm(
                 }
             }
 
-            if (provider != ProviderId.JETBRAINS_AI_ASSISTANT) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = when (provider.authMode) {
+                            ProviderAuthMode.API_KEY -> "API キー"
+                            else -> "トークン または 認証JSON"
+                        },
+                        color = colors.textSecondary,
+                        fontSize = 12.sp,
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            val text = clipboard.getText()?.text.orEmpty()
+                            if (text.isNotBlank()) primaryInput = text
+                        },
+                        shape = RoundedCornerShape(6.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                     ) {
+                        Icon(Icons.Outlined.ContentPaste, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("貼り付け", fontSize = 11.sp)
+                    }
+                }
+
+                OutlinedTextField(
+                    value = primaryInput,
+                    onValueChange = { primaryInput = it },
+                    placeholder = {
                         Text(
-                            text = when (provider) {
-                                ProviderId.DESKTOP_SYNC -> "認証トークン（設定している場合のみ・任意）"
-                                else -> when (provider.authMode) {
-                                    ProviderAuthMode.API_KEY -> "API キー"
-                                    else -> "トークン または 認証JSON"
-                                }
-                            },
-                            color = colors.textSecondary,
+                            "sk-... / Bearer Token / 認証JSON全体",
                             fontSize = 12.sp,
                         )
-                        OutlinedButton(
-                            onClick = {
-                                val text = clipboard.getText()?.text.orEmpty()
-                                if (text.isNotBlank()) primaryInput = text
-                            },
-                            shape = RoundedCornerShape(6.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                        ) {
-                            Icon(Icons.Outlined.ContentPaste, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("貼り付け", fontSize = 11.sp)
-                        }
-                    }
-
-                    OutlinedTextField(
-                        value = primaryInput,
-                        onValueChange = { primaryInput = it },
-                        placeholder = {
-                            Text(
-                                when (provider) {
-                                    ProviderId.DESKTOP_SYNC -> "未設定の場合は空欄"
-                                    else -> "sk-... / Bearer Token / 認証JSON全体"
-                                },
-                                fontSize = 12.sp,
-                            )
-                        },
-                        maxLines = 5,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
+                    },
+                    maxLines = 5,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
 
             if (detectedHint != null) {
@@ -455,13 +427,7 @@ private fun ProviderCredentialForm(
                     scope.launch {
                         errorMsg = null
                         val trimmedHost = customHost.trim()
-                        if (provider == ProviderId.DESKTOP_SYNC && trimmedHost.isEmpty()) {
-                            errorMsg = "デスクトップ版 OpenTokenUsage の URL を入力してください"
-                            return@launch
-                        }
-                        if (provider != ProviderId.DESKTOP_SYNC &&
-                            provider != ProviderId.JETBRAINS_AI_ASSISTANT &&
-                            primaryInput.isBlank() &&
+                        if (primaryInput.isBlank() &&
                             refreshTokenInput.isBlank()
                         ) {
                             errorMsg = "APIキーまたは認証トークンを入力してください"

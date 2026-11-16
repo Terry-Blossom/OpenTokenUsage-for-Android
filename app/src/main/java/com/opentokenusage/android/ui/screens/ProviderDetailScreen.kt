@@ -172,21 +172,6 @@ fun ProviderDetailScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (!isOwnedAccount) {
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = colors.card,
-                    border = BorderStroke(1.dp, colors.border),
-                ) {
-                    Text(
-                        text = "デスクトップアプリから取り込んだデータです。",
-                        color = colors.textSecondary,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(12.dp),
-                    )
-                }
-            }
-
             if (!snapshot.errorMessage.isNullOrBlank()) {
                 Surface(
                     shape = RoundedCornerShape(8.dp),

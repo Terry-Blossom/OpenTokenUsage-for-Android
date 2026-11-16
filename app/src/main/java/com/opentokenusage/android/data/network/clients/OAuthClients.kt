@@ -13,11 +13,7 @@ import com.opentokenusage.android.domain.model.AccountSecret
 import com.opentokenusage.android.domain.model.ConfiguredAccount
 import com.opentokenusage.android.domain.model.MetricFormat
 import com.opentokenusage.android.domain.model.MetricLine
-import com.opentokenusage.android.domain.model.ProviderId
-import com.opentokenusage.android.domain.model.ProviderSnapshot
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
@@ -487,7 +483,7 @@ class AntigravityClient(
         var access = cur.accessToken.trim()
         val refresh = cur.refreshToken.trim()
         if (access.isEmpty() && refresh.isEmpty()) {
-            throw ProviderProbeException("Antigravity の OAuth トークンが未設定です。デスクトップアプリからの連携も利用できます。", isAuthError = true)
+            throw ProviderProbeException("Antigravity の OAuth アクセストークンまたはリフレッシュトークンが未設定です", isAuthError = true)
         }
         var updated: AccountSecret? = null
         val exp = cur.expiresAtMs
@@ -678,7 +674,7 @@ class AntigravityClient(
         val clientSecret = com.opentokenusage.android.BuildConfig.ANTIGRAVITY_OAUTH_CLIENT_SECRET
         if (clientId.isBlank() || clientSecret.isBlank()) {
             throw ProviderProbeException(
-                "Google OAuth クライアント設定が未構成のため自動更新できません（デスクトップアプリからの連携、または有効なアクセストークンを利用してください）",
+                "Google OAuth クライアント設定が未構成のため自動更新できません。有効なアクセストークンを入力してください。",
                 isAuthError = true,
             )
         }
@@ -696,152 +692,5 @@ class AntigravityClient(
         val access = obj.strOrNull("access_token") ?: throw ProviderProbeException("Google access_token 欠落")
         val exp = (obj.longOrNull("expires_in") ?: 3600L) * 1000L + System.currentTimeMillis()
         return secret.copy(accessToken = access, expiresAtMs = exp)
-    }
-}
-
-class DesktopSyncClient(
-    private val http: OkHttpClient,
-    private val overrides: ProviderEndpointOverrides,
-) : ProviderClient {
-    override suspend fun probe(account: ConfiguredAccount, secret: AccountSecret, nowMs: Long): ProbeResult {
-        val rawHost = account.customHost.trim().ifBlank {
-            throw ProviderProbeException("デスクトップ版 OpenTokenUsage の接続先 URL を入力してください（例: http://100.x.y.z:6736）", isAuthError = true)
-        }
-        val normalized = if (rawHost.startsWith("http://") || rawHost.startsWith("https://")) {
-            rawHost.trimEnd('/')
-        } else {
-            "http://$rawHost".trimEnd('/')
-        }
-        val url = overrides.resolve("desktop-sync", normalized) + "/v1/usage"
-        val headers = buildMap {
-            put("Accept", "application/json")
-            if (secret.syncBearerToken.isNotBlank()) {
-                put("Authorization", "Bearer ${secret.syncBearerToken.trim()}")
-            }
-        }
-        val resp = ProviderHttpSupport.get(http, url, headers)
-        if (resp.statusCode == 401 || resp.statusCode == 403) {
-            throw ProviderProbeException("デスクトップ連携の認証エラー (HTTP ${resp.statusCode})", isAuthError = true)
-        }
-        if (resp.statusCode !in 200..299) {
-            throw ProviderProbeException("デスクトップ連携に失敗しました (HTTP ${resp.statusCode})")
-        }
-
-        val rootElement = runCatching { ProviderHttpSupport.json.parseToJsonElement(resp.bodyText) }.getOrNull()
-            ?: throw ProviderProbeException("デスクトップ連携の JSON 解析に失敗しました")
-
-        val providerArr: JsonArray = when (rootElement) {
-            is JsonArray -> rootElement
-            is JsonObject -> rootElement.arrOrNull("providers")
-                ?: rootElement.arrOrNull("items")
-                ?: rootElement.arrOrNull("data")
-                ?: JsonArray(emptyList())
-            else -> JsonArray(emptyList())
-        }
-
-        val synced = mutableListOf<ProviderSnapshot>()
-        for (el in providerArr) {
-            val obj = el as? JsonObject ?: continue
-            val pid = obj.strOrNull("providerId") ?: continue
-            val pName = obj.strOrNull("displayName") ?: ProviderId.fromId(pid)?.displayName ?: pid
-            val pPlan = obj.strOrNull("plan")
-            val fetchedAt = ProviderHttpSupport.parseDateMs(obj["fetchedAt"]) ?: nowMs
-            val parsedLines = parseRemoteLines(obj.arrOrNull("lines"))
-            val err = obj.strOrNull("error")
-            synced += ProviderSnapshot(
-                accountId = "sync_${account.id}_$pid",
-                providerId = pid,
-                displayName = pName,
-                accountLabel = account.label,
-                plan = pPlan,
-                lines = parsedLines,
-                fetchedAtMs = fetchedAt,
-                errorMessage = err,
-                isStale = false,
-            )
-        }
-
-        val summaryLines = listOf(
-            MetricLine.Text(
-                label = "連携プロバイダー数",
-                value = "${synced.size} 件",
-                subtitle = if (synced.isEmpty()) "デスクトップ側に有効なプロバイダーがありません" else synced.joinToString(", ") { it.displayName },
-            ),
-        )
-        return ProbeResult(
-            plan = "Sync",
-            lines = summaryLines,
-            desktopSyncedSnapshots = synced,
-        )
-    }
-
-    private fun parseRemoteLines(arr: JsonArray?): List<MetricLine> {
-        if (arr == null) return emptyList()
-        return arr.mapIndexedNotNull { idx, el ->
-            val obj = el as? JsonObject ?: return@mapIndexedNotNull null
-            val type = obj.strOrNull("type") ?: return@mapIndexedNotNull null
-            val label = obj.strOrNull("label") ?: ""
-            val scope = obj.strOrNull("scope") ?: "overview"
-            when (type) {
-                "progress" -> {
-                    val used = obj.doubleOrNull("used") ?: return@mapIndexedNotNull null
-                    val limit = obj.doubleOrNull("limit") ?: return@mapIndexedNotNull null
-                    val fmtObj = obj.objOrNull("format")
-                    val fmt = when (fmtObj?.strOrNull("kind")) {
-                        "dollars" -> MetricFormat.Dollars
-                        "count" -> MetricFormat.Count(fmtObj.strOrNull("suffix") ?: "")
-                        else -> MetricFormat.Percent
-                    }
-                    MetricLine.Progress(
-                        label = label,
-                        used = used,
-                        limit = limit,
-                        format = fmt,
-                        resetsAtMs = ProviderHttpSupport.parseDateMs(obj["resetsAt"]),
-                        periodDurationMs = obj.longOrNull("periodDurationMs"),
-                        colorHex = obj.strOrNull("color"),
-                        primaryOrder = obj.longOrNull("primaryOrder")?.toInt() ?: (idx + 1),
-                        period = obj.strOrNull("period"),
-                        scope = scope,
-                    )
-                }
-                "text" -> MetricLine.Text(
-                    label = label,
-                    value = obj.strOrNull("value") ?: "",
-                    colorHex = obj.strOrNull("color"),
-                    subtitle = obj.strOrNull("subtitle"),
-                    scope = scope,
-                )
-                "badge" -> MetricLine.Badge(
-                    label = label,
-                    text = obj.strOrNull("text") ?: "",
-                    colorHex = obj.strOrNull("color"),
-                    subtitle = obj.strOrNull("subtitle"),
-                    scope = scope,
-                )
-                "barChart" -> {
-                    val vals = obj.arrOrNull("values")?.mapNotNull {
-                        (it as? JsonPrimitive)?.doubleOrNull
-                    }.orEmpty()
-                    MetricLine.BarChart(label = label, values = vals, scope = scope)
-                }
-                else -> null
-            }
-        }
-    }
-}
-
-class JetBrainsSyncHintClient(
-    private val http: OkHttpClient,
-) : ProviderClient {
-    override suspend fun probe(account: ConfiguredAccount, secret: AccountSecret, nowMs: Long): ProbeResult {
-        if (account.customHost.startsWith("http")) {
-            val hub = DesktopSyncClient(http, ProviderEndpointOverrides())
-            val res = hub.probe(account, secret, nowMs)
-            val jb = res.desktopSyncedSnapshots?.firstOrNull { it.providerId == ProviderId.JETBRAINS_AI_ASSISTANT.id }
-                ?: throw ProviderProbeException("デスクトップ側に JetBrains AI Assistant のデータがまだありません")
-            return ProbeResult(plan = jb.plan, lines = jb.lines)
-        }
-        throw ProviderProbeException("JetBrains AI はデスクトップIDE設定のみ対応です。デスクトップ版 OpenTokenUsage のURLを設定してください。", isAuthError = false)
     }
 }

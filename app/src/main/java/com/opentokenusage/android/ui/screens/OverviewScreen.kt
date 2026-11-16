@@ -23,7 +23,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Widgets
@@ -55,7 +54,6 @@ import androidx.compose.ui.unit.sp
 import com.opentokenusage.android.domain.logic.UsageDisplayFormatter
 import com.opentokenusage.android.domain.model.AppSettings
 import com.opentokenusage.android.domain.model.ConfiguredAccount
-import com.opentokenusage.android.domain.model.ProviderId
 import com.opentokenusage.android.domain.model.ProviderSnapshot
 import com.opentokenusage.android.domain.model.ResetTimerMode
 import com.opentokenusage.android.domain.model.UsageDisplayMode
@@ -190,7 +188,6 @@ fun OverviewScreen(
             if (accounts.isEmpty()) {
                 EmptyDashboardView(
                     onAddProvider = { onAddProvider(null) },
-                    onAddDesktopSync = { onAddProvider(ProviderId.DESKTOP_SYNC.id) },
                     onPinOverviewWidget = {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                             val awm = context.getSystemService(AppWidgetManager::class.java)
@@ -258,7 +255,6 @@ private fun CompactChipButton(
 @Composable
 private fun EmptyDashboardView(
     onAddProvider: () -> Unit,
-    onAddDesktopSync: () -> Unit,
     onPinOverviewWidget: () -> Unit,
 ) {
     val colors = LocalOtuColors.current
@@ -285,7 +281,7 @@ private fun EmptyDashboardView(
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    text = "APIキー、CLI認証JSON、またはデスクトップ版の接続先を追加すると、使用率とホーム画面ウィジェットに実データが表示されます。",
+                    text = "APIキー、OAuthトークン、または認証JSONを追加すると、使用率とホーム画面ウィジェットに実データが表示されます。",
                     color = colors.textSecondary,
                     fontSize = 13.sp,
                     lineHeight = 19.sp,
@@ -300,21 +296,6 @@ private fun EmptyDashboardView(
                     Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("プロバイダーを追加", fontWeight = FontWeight.SemiBold)
-                }
-                OutlinedButton(
-                    onClick = onAddDesktopSync,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, colors.border),
-                ) {
-                    Icon(
-                        Icons.Outlined.Computer,
-                        contentDescription = null,
-                        tint = colors.textPrimary,
-                        modifier = Modifier.size(17.dp),
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text("デスクトップデータを取り込む", color = colors.textPrimary)
                 }
                 OutlinedButton(
                     onClick = onPinOverviewWidget,

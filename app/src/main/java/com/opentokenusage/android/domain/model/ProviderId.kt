@@ -5,14 +5,9 @@ enum class ProviderAuthMode {
     API_KEY,
     OAUTH_OR_JSON,
     SESSION_OR_OAUTH,
-    DESKTOP_SYNC_RECOMMENDED,
-    DESKTOP_SYNC_HUB,
 }
 
-/**
- * Supported AI service providers matching desktop OpenTokenUsage plugins,
- * plus the Desktop Sync bridge for importing desktop-only probes over LAN/Tailscale.
- */
+/** Supported AI service providers with direct Android API or OAuth access. */
 enum class ProviderId(
     val id: String,
     val displayName: String,
@@ -62,15 +57,7 @@ enum class ProviderId(
         brandColorRgb = 0xFF4285F4,
         authMode = ProviderAuthMode.OAUTH_OR_JSON,
         keyHelpUrl = "https://idx.dev",
-        localFileHint = "Google OAuth Refresh Token またはデスクトップアプリからの連携",
-    ),
-    JETBRAINS_AI_ASSISTANT(
-        id = "jetbrains-ai-assistant",
-        displayName = "JetBrains AI",
-        brandColorRgb = 0xFF7D5FE6,
-        authMode = ProviderAuthMode.DESKTOP_SYNC_RECOMMENDED,
-        keyHelpUrl = "https://www.jetbrains.com/ai/",
-        localFileHint = "デスクトップIDEのみ対応（デスクトップアプリ経由で連携できます）",
+        localFileHint = "Google OAuth Access Token または Refresh Token",
     ),
     OPENROUTER(
         id = "openrouter",
@@ -169,15 +156,6 @@ enum class ProviderId(
         authMode = ProviderAuthMode.OAUTH_OR_JSON,
         keyHelpUrl = "https://kiro.dev",
         localFileHint = "~/.aws/sso/cache/kiro-auth-token.json (+ profileArn)",
-    ),
-    DESKTOP_SYNC(
-        id = "desktop-sync",
-        displayName = "デスクトップデータ",
-        brandColorRgb = 0xFF0078D4,
-        authMode = ProviderAuthMode.DESKTOP_SYNC_HUB,
-        keyHelpUrl = "https://github.com/PowerUserZ/OpenTokenUsage",
-        localFileHint = "デスクトップ版の設定で Local HTTP API (:6736) を有効化し、Tailscale等経由のURLを指定",
-        supportsCustomHost = true,
     );
 
     companion object {

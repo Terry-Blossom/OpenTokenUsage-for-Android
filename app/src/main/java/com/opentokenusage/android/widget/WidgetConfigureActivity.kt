@@ -107,7 +107,7 @@ class WidgetConfigureActivity : ComponentActivity() {
                                     fontWeight = FontWeight.SemiBold,
                                 )
                                 Text(
-                                    text = "アプリを開いて APIキーまたはデスクトップデータを追加してから、このウィジェットを配置してください。",
+                                    text = "アプリを開いて APIキーまたは OAuth トークンを追加してから、このウィジェットを配置してください。",
                                     color = colors.textSecondary,
                                     fontSize = 13.sp,
                                 )

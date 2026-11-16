@@ -4,7 +4,6 @@ import com.opentokenusage.android.data.network.ProviderProbeException
 import com.opentokenusage.android.data.network.clients.ClaudeClient
 import com.opentokenusage.android.data.network.clients.CodexClient
 import com.opentokenusage.android.data.network.clients.CopilotClient
-import com.opentokenusage.android.data.network.clients.DesktopSyncClient
 import com.opentokenusage.android.data.network.clients.OpenRouterClient
 import com.opentokenusage.android.data.network.clients.ProviderEndpointOverrides
 import com.opentokenusage.android.data.network.clients.ZaiClient
@@ -152,29 +151,4 @@ class ProviderClientsMockTest {
         assertEquals(18.0, (zai.lines[0] as MetricLine.Progress).used, 0.01)
     }
 
-    @Test
-    fun desktopSyncExpandsProvidersWithoutFakeDefaults() = runTest {
-        server.enqueue(
-            MockResponse().setResponseCode(200).setBody(
-                """{"providers":[{"providerId":"jetbrains-ai-assistant","displayName":"JetBrains AI","plan":"AI Pro","lines":[{"type":"progress","label":"Quota","used":25,"limit":100,"format":{"kind":"percent"}}]}]}""",
-            ),
-        )
-        val syncClient = DesktopSyncClient(http, ProviderEndpointOverrides(mapOf("desktop-sync" to baseUrl)))
-        val res = syncClient.probe(
-            ConfiguredAccount("hub1", ProviderId.DESKTOP_SYNC.id, customHost = baseUrl),
-            AccountSecret(),
-        )
-        val children = res.desktopSyncedSnapshots!!
-        assertEquals(1, children.size)
-        assertEquals("jetbrains-ai-assistant", children[0].providerId)
-        assertEquals(25.0, (children[0].lines[0] as MetricLine.Progress).used, 0.01)
-
-        // Empty response yields empty children
-        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"providers":[]}"""))
-        val emptyRes = syncClient.probe(
-            ConfiguredAccount("hub1", ProviderId.DESKTOP_SYNC.id, customHost = baseUrl),
-            AccountSecret(),
-        )
-        assertTrue(emptyRes.desktopSyncedSnapshots!!.isEmpty())
-    }
 }

@@ -106,12 +106,14 @@ class MoreClientsAndFormattersTest {
         // OpenCode Go
         server.enqueue(
             MockResponse().setResponseCode(200).setBody(
-                """{"usage":{"rolling":{"percent":14,"resetsAt":"2026-11-15T12:00:00Z"},"weekly":{"percent":33,"resetsAt":"2026-11-20T00:00:00Z"}}}""",
+                """{"usage":{"rolling":{"percent":14,"resetsAt":"2026-11-15T12:00:00Z"},"weekly":{"percent":33,"resetsAt":"2026-11-20T00:00:00Z"},"monthly":{"percent":58,"resetsAt":"2026-12-01T00:00:00Z"}}}""",
             ),
         )
         val oc = OpenCodeGoClient(http, ProviderEndpointOverrides(mapOf("opencode-go" to baseUrl)))
             .probe(ConfiguredAccount("o1", ProviderId.OPENCODE_GO.id), AccountSecret(apiKey = "oc"))
         assertEquals(14.0, (oc.lines[0] as MetricLine.Progress).used, 0.01)
+        assertEquals(listOf("Session", "Weekly", "Monthly"), oc.lines.map { it.label })
+        assertEquals("detail", oc.lines[2].scope)
 
         // Amp
         server.enqueue(
