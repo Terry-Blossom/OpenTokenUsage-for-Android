@@ -1,7 +1,7 @@
 package com.opentokenusage.android.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -21,8 +21,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.Login
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.ContentPaste
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -47,11 +50,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.opentokenusage.android.data.auth.AntigravityOAuthCoordinator
+import com.opentokenusage.android.data.auth.AntigravityOAuthClientSettings
+import com.opentokenusage.android.data.auth.AntigravityOAuthConfig
+import com.opentokenusage.android.data.auth.AntigravityOAuthUiState
 import com.opentokenusage.android.domain.logic.CredentialInputParser
 import com.opentokenusage.android.domain.model.AccountSecret
 import com.opentokenusage.android.domain.model.ConfiguredAccount
@@ -68,6 +78,9 @@ fun AddProviderScreen(
     preselectedProviderId: String?,
     editingAccount: ConfiguredAccount?,
     initialSecret: AccountSecret?,
+    antigravityOAuth: AntigravityOAuthCoordinator? = null,
+    antigravityOAuthSettings: AntigravityOAuthClientSettings = AntigravityOAuthClientSettings(),
+    onSaveAntigravityOAuthSettings: suspend (String, String) -> Unit = { _, _ -> },
     onTestAndSaveNew: suspend (ProviderId, String, MiniMaxRegion, String, AccountSecret, Boolean) -> Result<ConfiguredAccount>,
     onUpdateExisting: suspend (String, String, MiniMaxRegion, String, AccountSecret?) -> Unit,
     onBack: () -> Unit,
@@ -140,6 +153,7 @@ fun AddProviderScreen(
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(p.displayName, color = colors.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                                     val sub = when {
+                                        p == ProviderId.ANTIGRAVITY -> "Google ログイン / OAuth トークン"
                                         p == ProviderId.CURSOR || p == ProviderId.GROK -> "crsr_ APIキー / トークン"
                                         p.authMode == ProviderAuthMode.API_KEY -> "APIキーで接続"
                                         p.authMode == ProviderAuthMode.OAUTH_OR_JSON -> "OAuthトークン / 認証JSON"
@@ -159,7 +173,11 @@ fun AddProviderScreen(
             provider = provider,
             editingAccount = editingAccount,
             initialSecret = initialSecret,
+            antigravityOAuth = antigravityOAuth,
+            antigravityOAuthSettings = antigravityOAuthSettings,
+            onSaveAntigravityOAuthSettings = onSaveAntigravityOAuthSettings,
             onBack = {
+                if (provider == ProviderId.ANTIGRAVITY) antigravityOAuth?.cancel()
                 if (editingAccount != null || preselectedProviderId != null) onBack() else selectedProvider = null
             },
             onSave = onTestAndSaveNew,
@@ -174,12 +192,16 @@ private fun ProviderCredentialForm(
     provider: ProviderId,
     editingAccount: ConfiguredAccount?,
     initialSecret: AccountSecret?,
+    antigravityOAuth: AntigravityOAuthCoordinator?,
+    antigravityOAuthSettings: AntigravityOAuthClientSettings,
+    onSaveAntigravityOAuthSettings: suspend (String, String) -> Unit,
     onBack: () -> Unit,
     onSave: suspend (ProviderId, String, MiniMaxRegion, String, AccountSecret, Boolean) -> Result<ConfiguredAccount>,
     onUpdate: suspend (String, String, MiniMaxRegion, String, AccountSecret?) -> Unit,
 ) {
     val colors = LocalOtuColors.current
     val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
     val scope = rememberCoroutineScope()
 
@@ -208,10 +230,70 @@ private fun ProviderCredentialForm(
     var detectedHint by remember { mutableStateOf<String?>(null) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var isSubmitting by remember { mutableStateOf(false) }
+    var manualCallbackInput by remember { mutableStateOf("") }
+    var showManualInputs by remember(provider, editingAccount) {
+        mutableStateOf(provider != ProviderId.ANTIGRAVITY || editingAccount != null)
+    }
+
+    val oauthState by if (provider == ProviderId.ANTIGRAVITY && antigravityOAuth != null) {
+        antigravityOAuth.state.collectAsStateWithLifecycle()
+    } else {
+        remember { mutableStateOf<AntigravityOAuthUiState>(AntigravityOAuthUiState.Idle) }
+    }
+
+    if (provider == ProviderId.ANTIGRAVITY) {
+        BackHandler {
+            antigravityOAuth?.cancel()
+            onBack()
+        }
+    }
+
+    LaunchedEffect(oauthState) {
+        if (provider != ProviderId.ANTIGRAVITY || antigravityOAuth == null) return@LaunchedEffect
+        when (val st = oauthState) {
+            is AntigravityOAuthUiState.Success -> {
+                primaryInput = st.secret.accessToken
+                refreshTokenInput = st.secret.refreshToken
+                accountIdOrArn = st.secret.accountId
+                val effectiveAlias = alias.trim().ifBlank { st.email.orEmpty() }
+                if (alias.isBlank() && !st.email.isNullOrBlank()) {
+                    alias = st.email
+                }
+                errorMsg = null
+                isSubmitting = true
+                try {
+                    if (editingAccount == null) {
+                        val res = onSave(provider, effectiveAlias, region, customHost.trim(), st.secret, true)
+                        antigravityOAuth.reset()
+                        if (res.isSuccess) {
+                            onBack()
+                        } else {
+                            showManualInputs = true
+                            errorMsg = res.exceptionOrNull()?.message ?: "接続テストに失敗しました"
+                        }
+                    } else {
+                        onUpdate(editingAccount.id, effectiveAlias, region, customHost.trim(), st.secret)
+                        antigravityOAuth.reset()
+                        onBack()
+                    }
+                } finally {
+                    isSubmitting = false
+                }
+            }
+            is AntigravityOAuthUiState.Error -> {
+                errorMsg = st.message
+            }
+            else -> Unit
+        }
+    }
 
     LaunchedEffect(primaryInput) {
         val trimmed = primaryInput.trim()
-        if (trimmed.startsWith("{") || trimmed.contains("%3A%3A") || (provider == ProviderId.DEVIN && trimmed.contains("="))) {
+        if (trimmed.startsWith("{") ||
+            trimmed.startsWith("1//") ||
+            trimmed.contains("%3A%3A") ||
+            (provider == ProviderId.DEVIN && trimmed.contains("="))
+        ) {
             val parsed = CredentialInputParser.parse(provider, trimmed, refreshTokenInput, accountIdOrArn, awsRegion)
             detectedHint = parsed.detectedNote
         } else {
@@ -256,7 +338,7 @@ private fun ProviderCredentialForm(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (provider.localFileHint.isNotBlank() || provider.keyHelpUrl.isNotBlank()) {
+            if (provider != ProviderId.ANTIGRAVITY && (provider.localFileHint.isNotBlank() || provider.keyHelpUrl.isNotBlank())) {
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = colors.card,
@@ -299,10 +381,68 @@ private fun ProviderCredentialForm(
                 value = alias,
                 onValueChange = { alias = it },
                 label = { Text("アカウント名（任意・複数アカウント識別用）") },
-                placeholder = { Text("例: 仕事用 / 個人") },
+                placeholder = { Text(if (provider == ProviderId.ANTIGRAVITY) "未入力時は Google メールアドレス" else "例: 仕事用 / 個人") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
+
+            if (provider == ProviderId.ANTIGRAVITY && antigravityOAuth != null) {
+                AntigravityGoogleLoginCard(
+                    oauthState = oauthState,
+                    clientSettings = antigravityOAuthSettings,
+                    isEditing = editingAccount != null,
+                    isSubmitting = isSubmitting,
+                    manualCallbackInput = manualCallbackInput,
+                    onManualCallbackChange = { manualCallbackInput = it },
+                    onSaveClientSettings = onSaveAntigravityOAuthSettings,
+                    onStartLogin = {
+                        errorMsg = null
+                        manualCallbackInput = ""
+                        antigravityOAuth.startLogin(context)
+                    },
+                    onReopenBrowser = { antigravityOAuth.reopenBrowser(context) },
+                    onCancelLogin = {
+                        manualCallbackInput = ""
+                        antigravityOAuth.cancel()
+                    },
+                    onSubmitManualCallback = {
+                        errorMsg = null
+                        antigravityOAuth.submitManualCallback(manualCallbackInput)
+                    },
+                    onPasteManualCallback = {
+                        val pasted = clipboard.getText()?.text.orEmpty()
+                        if (pasted.isNotBlank()) manualCallbackInput = pasted
+                    },
+                )
+
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showManualInputs = !showManualInputs },
+                    shape = RoundedCornerShape(8.dp),
+                    color = colors.card,
+                    border = BorderStroke(1.dp, colors.border),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            text = "手動でトークン・JSON を入力",
+                            color = colors.textSecondary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Icon(
+                            imageVector = if (showManualInputs) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                            contentDescription = null,
+                            tint = colors.textMuted,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+            }
 
             if (provider.supportsCustomHost) {
                 OutlinedTextField(
@@ -331,82 +471,91 @@ private fun ProviderCredentialForm(
                 }
             }
 
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = when {
-                            provider == ProviderId.CURSOR || provider == ProviderId.GROK -> "API キー（crsr_...）/ トークン または 認証JSON"
-                            provider.authMode == ProviderAuthMode.API_KEY -> "API キー"
-                            else -> "トークン または 認証JSON"
-                        },
-                        color = colors.textSecondary,
-                        fontSize = 12.sp,
-                    )
-                    OutlinedButton(
-                        onClick = {
-                            val text = clipboard.getText()?.text.orEmpty()
-                            if (text.isNotBlank()) primaryInput = text
-                        },
-                        shape = RoundedCornerShape(6.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+            if (showManualInputs) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(Icons.Outlined.ContentPaste, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("貼り付け", fontSize = 11.sp)
-                    }
-                }
-
-                OutlinedTextField(
-                    value = primaryInput,
-                    onValueChange = { primaryInput = it },
-                    placeholder = {
                         Text(
-                            if (provider == ProviderId.CURSOR || provider == ProviderId.GROK) {
-                                "crsr_... / Bearer Token / 認証JSON全体"
-                            } else {
-                                "sk-... / Bearer Token / 認証JSON全体"
+                            text = when {
+                                provider == ProviderId.CURSOR || provider == ProviderId.GROK -> "API キー（crsr_...）/ トークン または 認証JSON"
+                                provider.authMode == ProviderAuthMode.API_KEY -> "API キー"
+                                else -> "トークン または 認証JSON"
                             },
+                            color = colors.textSecondary,
                             fontSize = 12.sp,
                         )
-                    },
-                    maxLines = 5,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
+                        OutlinedButton(
+                            onClick = {
+                                val text = clipboard.getText()?.text.orEmpty()
+                                if (text.isNotBlank()) primaryInput = text
+                            },
+                            shape = RoundedCornerShape(6.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        ) {
+                            Icon(Icons.Outlined.ContentPaste, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("貼り付け", fontSize = 11.sp)
+                        }
+                    }
 
-            if (detectedHint != null) {
-                Text(
-                    text = detectedHint!!,
-                    color = colors.paceGreen,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                )
-            }
+                    OutlinedTextField(
+                        value = primaryInput,
+                        onValueChange = { primaryInput = it },
+                        placeholder = {
+                            Text(
+                                if (provider == ProviderId.CURSOR || provider == ProviderId.GROK) {
+                                    "crsr_... / Bearer Token / 認証JSON全体"
+                                } else {
+                                    "sk-... / Bearer Token / 認証JSON全体"
+                                },
+                                fontSize = 12.sp,
+                            )
+                        },
+                        maxLines = 5,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
 
-            if (provider.authMode == ProviderAuthMode.OAUTH_OR_JSON || provider.authMode == ProviderAuthMode.SESSION_OR_OAUTH) {
-                OutlinedTextField(
-                    value = refreshTokenInput,
-                    onValueChange = { refreshTokenInput = it },
-                    label = { Text("Refresh Token（任意・JSON貼付時は自動抽出）") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
+                if (detectedHint != null) {
+                    Text(
+                        text = detectedHint!!,
+                        color = colors.paceGreen,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
 
-            if (provider == ProviderId.CODEX || provider == ProviderId.KIRO) {
-                OutlinedTextField(
-                    value = accountIdOrArn,
-                    onValueChange = { accountIdOrArn = it },
-                    label = { Text(if (provider == ProviderId.KIRO) "profileArn（任意）" else "ChatGPT Account ID（任意）") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
+                if (provider.authMode == ProviderAuthMode.OAUTH_OR_JSON || provider.authMode == ProviderAuthMode.SESSION_OR_OAUTH) {
+                    OutlinedTextField(
+                        value = refreshTokenInput,
+                        onValueChange = { refreshTokenInput = it },
+                        label = { Text("Refresh Token（任意・JSON貼付時は自動抽出）") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
 
+                if (provider == ProviderId.CODEX || provider == ProviderId.KIRO || provider == ProviderId.ANTIGRAVITY) {
+                    OutlinedTextField(
+                        value = accountIdOrArn,
+                        onValueChange = { accountIdOrArn = it },
+                        label = {
+                            Text(
+                                when (provider) {
+                                    ProviderId.KIRO -> "profileArn（任意）"
+                                    ProviderId.ANTIGRAVITY -> "Project ID（任意・自動取得可）"
+                                    else -> "ChatGPT Account ID（任意）"
+                                },
+                            )
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
             if (!errorMsg.isNullOrBlank()) {
                 Surface(
                     shape = RoundedCornerShape(8.dp),
@@ -422,56 +571,286 @@ private fun ProviderCredentialForm(
                 }
             }
 
-            Spacer(Modifier.height(4.dp))
+            if (showManualInputs) {
+                Spacer(Modifier.height(4.dp))
 
+                Button(
+                    enabled = !isSubmitting,
+                    modifier = Modifier.fillMaxWidth().height(46.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.accent),
+                    onClick = {
+                        scope.launch {
+                            errorMsg = null
+                            val trimmedHost = customHost.trim()
+                            if (primaryInput.isBlank() &&
+                                refreshTokenInput.isBlank()
+                            ) {
+                                errorMsg = "APIキーまたは認証トークンを入力してください"
+                                return@launch
+                            }
+
+                            isSubmitting = true
+                            try {
+                                val parsed = CredentialInputParser.parse(
+                                    providerId = provider,
+                                    primaryInput = primaryInput,
+                                    secondaryRefreshToken = refreshTokenInput,
+                                    accountIdOrArn = accountIdOrArn,
+                                    awsRegion = awsRegion,
+                                )
+                                if (editingAccount == null) {
+                                    val res = onSave(provider, alias, region, trimmedHost, parsed.secret, true)
+                                    if (res.isSuccess) {
+                                        onBack()
+                                    } else {
+                                        errorMsg = res.exceptionOrNull()?.message ?: "接続テストに失敗しました"
+                                    }
+                                } else {
+                                    onUpdate(editingAccount.id, alias, region, trimmedHost, parsed.secret)
+                                    onBack()
+                                }
+                            } finally {
+                                isSubmitting = false
+                            }
+                        }
+                    },
+                ) {
+                    if (isSubmitting) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = colors.textPrimary)
+                        Spacer(Modifier.width(8.dp))
+                        Text("接続を確認中...")
+                    } else {
+                        Text(if (editingAccount == null) "接続テストして追加" else "保存して再取得", fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AntigravityGoogleLoginCard(
+    oauthState: AntigravityOAuthUiState,
+    clientSettings: AntigravityOAuthClientSettings,
+    isEditing: Boolean,
+    isSubmitting: Boolean,
+    manualCallbackInput: String,
+    onManualCallbackChange: (String) -> Unit,
+    onSaveClientSettings: suspend (String, String) -> Unit,
+    onStartLogin: () -> Unit,
+    onReopenBrowser: () -> Unit,
+    onCancelLogin: () -> Unit,
+    onSubmitManualCallback: () -> Unit,
+    onPasteManualCallback: () -> Unit,
+) {
+    val colors = LocalOtuColors.current
+    val scope = rememberCoroutineScope()
+    var clientIdInput by remember(clientSettings.clientId) { mutableStateOf(clientSettings.clientId) }
+    var clientSecretInput by remember(clientSettings.clientSecret) { mutableStateOf(clientSettings.clientSecret) }
+    var isSavingClientSettings by remember { mutableStateOf(false) }
+    var clientSettingsMessage by remember { mutableStateOf<String?>(null) }
+    val isWaiting = oauthState is AntigravityOAuthUiState.WaitingForBrowser
+    val isExchanging = oauthState is AntigravityOAuthUiState.ExchangingToken || isSubmitting
+    val clientSettingsAreValid = clientIdInput.isNotBlank() && clientSecretInput.isNotBlank()
+    val clientSettingsAreDirty = clientIdInput.trim() != clientSettings.clientId ||
+        clientSecretInput.trim() != clientSettings.clientSecret
+
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = colors.card,
+        border = BorderStroke(1.dp, colors.border),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = "Google OAuth クライアント設定",
+                color = colors.textPrimary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "Client ID と Client Secret はこの端末に暗号化して保存します。Google Cloud Console で作成した OAuth クライアントを入力してください。",
+                color = colors.textSecondary,
+                fontSize = 11.sp,
+                lineHeight = 16.sp,
+            )
+            OutlinedTextField(
+                value = clientIdInput,
+                onValueChange = {
+                    clientIdInput = it
+                    clientSettingsMessage = null
+                },
+                label = { Text("OAuth Client ID") },
+                singleLine = true,
+                enabled = !isWaiting && !isExchanging && !isSavingClientSettings,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = clientSecretInput,
+                onValueChange = {
+                    clientSecretInput = it
+                    clientSettingsMessage = null
+                },
+                label = { Text("OAuth Client Secret") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                enabled = !isWaiting && !isExchanging && !isSavingClientSettings,
+                modifier = Modifier.fillMaxWidth(),
+            )
             Button(
-                enabled = !isSubmitting,
-                modifier = Modifier.fillMaxWidth().height(46.dp),
-                shape = RoundedCornerShape(8.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = colors.accent),
                 onClick = {
                     scope.launch {
-                        errorMsg = null
-                        val trimmedHost = customHost.trim()
-                        if (primaryInput.isBlank() &&
-                            refreshTokenInput.isBlank()
-                        ) {
-                            errorMsg = "APIキーまたは認証トークンを入力してください"
-                            return@launch
-                        }
-
-                        isSubmitting = true
+                        isSavingClientSettings = true
+                        clientSettingsMessage = null
                         try {
-                            val parsed = CredentialInputParser.parse(
-                                providerId = provider,
-                                primaryInput = primaryInput,
-                                secondaryRefreshToken = refreshTokenInput,
-                                accountIdOrArn = accountIdOrArn,
-                                awsRegion = awsRegion,
-                            )
-                            if (editingAccount == null) {
-                                val res = onSave(provider, alias, region, trimmedHost, parsed.secret, true)
-                                if (res.isSuccess) {
-                                    onBack()
-                                } else {
-                                    errorMsg = res.exceptionOrNull()?.message ?: "接続テストに失敗しました"
-                                }
-                            } else {
-                                onUpdate(editingAccount.id, alias, region, trimmedHost, parsed.secret)
-                                onBack()
-                            }
+                            onSaveClientSettings(clientIdInput, clientSecretInput)
+                            clientSettingsMessage = "OAuth 設定をこの端末に保存しました。"
+                        } catch (err: Exception) {
+                            clientSettingsMessage = err.message ?: "OAuth 設定を保存できませんでした。"
                         } finally {
-                            isSubmitting = false
+                            isSavingClientSettings = false
                         }
                     }
                 },
+                enabled = clientSettingsAreValid && clientSettingsAreDirty && !isSavingClientSettings && !isWaiting && !isExchanging,
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = colors.elevatedSurface),
             ) {
-                if (isSubmitting) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = colors.textPrimary)
-                    Spacer(Modifier.width(8.dp))
-                    Text("接続を確認中...")
-                } else {
-                    Text(if (editingAccount == null) "接続テストして追加" else "保存して再取得", fontWeight = FontWeight.SemiBold)
+                Text(
+                    text = if (isSavingClientSettings) "保存中..." else "OAuth設定を保存",
+                    color = colors.textPrimary,
+                    fontSize = 12.sp,
+                )
+            }
+            if (clientSettingsMessage != null) {
+                Text(clientSettingsMessage!!, color = colors.textSecondary, fontSize = 11.sp)
+            }
+            Text(
+                text = "Google OAuth のリダイレクトURIは ${AntigravityOAuthConfig.REDIRECT_URI} を使用します。",
+                color = colors.textMuted,
+                fontSize = 10.sp,
+            )
+
+            Text(
+                text = "Google アカウントでログイン",
+                color = colors.textPrimary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            val subtitle = when (oauthState) {
+                is AntigravityOAuthUiState.WaitingForBrowser ->
+                    if (oauthState.localServerActive) {
+                        "ブラウザでログインを完了するとアプリに自動で戻ります。"
+                    } else {
+                        "待機ポートが使用中のため、ログイン後の URL を下に貼り付けてください。"
+                    }
+                is AntigravityOAuthUiState.ExchangingToken ->
+                    "トークンとプロジェクト情報を取得しています..."
+                else ->
+                    "ブラウザで Google にログインし、トークンとプロジェクト ID を自動取得します。"
+            }
+            Text(subtitle, color = colors.textSecondary, fontSize = 12.sp, lineHeight = 17.sp)
+
+            when {
+                isExchanging -> {
+                    Button(
+                        enabled = false,
+                        onClick = {},
+                        modifier = Modifier.fillMaxWidth().height(44.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = colors.accent),
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = colors.textPrimary)
+                        Spacer(Modifier.width(8.dp))
+                        Text("認証を完了中...", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                isWaiting -> {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = onReopenBrowser,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, colors.border),
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("ブラウザを再度開く", fontSize = 12.sp)
+                        }
+                        OutlinedButton(
+                            onClick = onCancelLogin,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, colors.border),
+                        ) {
+                            Text("キャンセル", fontSize = 12.sp)
+                        }
+                    }
+
+                    Text(
+                        text = "自動で戻らない場合はリダイレクト後の URL を貼り付け",
+                        color = colors.textMuted,
+                        fontSize = 11.sp,
+                    )
+                    OutlinedTextField(
+                        value = manualCallbackInput,
+                        onValueChange = onManualCallbackChange,
+                        placeholder = { Text("http://localhost:51121/oauth-callback?code=...", fontSize = 11.sp) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = onPasteManualCallback,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, colors.border),
+                        ) {
+                            Icon(Icons.Outlined.ContentPaste, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("貼り付け", fontSize = 12.sp)
+                        }
+                        Button(
+                            onClick = onSubmitManualCallback,
+                            enabled = manualCallbackInput.isNotBlank(),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = colors.accent),
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text("URL から認証を完了", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+                else -> {
+                    Button(
+                        onClick = onStartLogin,
+                        enabled = clientSettings.isConfigured && !clientSettingsAreDirty,
+                        modifier = Modifier.fillMaxWidth().height(44.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = colors.accent),
+                    ) {
+                        Icon(Icons.AutoMirrored.Outlined.Login, contentDescription = null, modifier = Modifier.size(17.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = when {
+                                !clientSettings.isConfigured -> "先に OAuth Client ID / Secret を設定"
+                                clientSettingsAreDirty -> "OAuth設定を保存してください"
+                                isEditing -> "Google で再ログイン"
+                                else -> "Google でログイン"
+                            },
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
                 }
             }
         }

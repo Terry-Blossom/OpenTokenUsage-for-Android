@@ -198,4 +198,45 @@ class MoreClientsAndFormattersTest {
         assertEquals("Claude", agy.lines[2].label)
         assertEquals(50.0, (agy.lines[2] as MetricLine.Progress).used, 0.01)
     }
+
+    @Test
+    fun antigravityRefreshesExpiredTokenWithPackedProjectId() = runTest {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"access_token":"ya29.refreshed","expires_in":3600}""",
+            ),
+        )
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"cloudaicompanionProject":{"id":"proj-obj"},"paidTier":{"id":"g1-pro-tier"}}""",
+            ),
+        )
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"response":{"groups":[{"displayName":"Shared","buckets":[{"bucketId":"gemini-5h","remainingFraction":0.8,"resetTime":"2026-11-15T15:00:00Z"}]}]}}""",
+            ),
+        )
+
+        val agy = AntigravityClient(
+            http,
+            ProviderEndpointOverrides(
+                mapOf(
+                    "google-oauth" to baseUrl,
+                    "antigravity" to baseUrl,
+                    "antigravity-daily" to baseUrl,
+                ),
+            ),
+            oauthClientIdProvider = { "test-client-id" },
+            oauthClientSecretProvider = { "test-client-secret" },
+        ).probe(
+            ConfiguredAccount("ag2", ProviderId.ANTIGRAVITY.id),
+            AccountSecret(refreshToken = "1//0gRefresh|proj-fallback"),
+        )
+
+        assertEquals("Google AI Pro", agy.plan)
+        assertEquals("ya29.refreshed", agy.updatedSecret?.accessToken)
+        assertEquals("1//0gRefresh", agy.updatedSecret?.refreshToken)
+        assertEquals("proj-fallback", agy.updatedSecret?.accountId)
+        assertEquals(20.0, (agy.lines[0] as MetricLine.Progress).used, 0.01)
+    }
 }

@@ -37,9 +37,11 @@ JDK 17 と Android SDK（`ANDROID_HOME` または `local.properties`）が必要
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-### 補足: Antigravity の OAuth 自動リフレッシュ設定（任意）
+### Antigravity の Google OAuth ログイン
 
-OAuth クライアント情報はリポジトリに含めていません。Antigravity のトークン自動更新をビルドに含める場合は、ビルド時に Gradle プロパティまたは環境変数で指定してください（未指定時は有効なアクセストークンを利用できます）。
+「プロバイダー追加 → Antigravity」で Google OAuth Client ID と Client Secret を入力して保存し、「Google でログイン」をタップします。認証情報は端末内に暗号化保存されます。OAuth クライアントにはアプリに表示されるリダイレクト URI を許可してください。
+
+ビルド時に `local.properties`・Gradle プロパティ・環境変数を指定すると、入力欄に初期値として反映できます:
 
 - `antigravityOAuthClientId` / `ANTIGRAVITY_OAUTH_CLIENT_ID`
 - `antigravityOAuthClientSecret` / `ANTIGRAVITY_OAUTH_CLIENT_SECRET`

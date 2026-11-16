@@ -70,4 +70,26 @@ class CredentialInputParserTest {
         assertEquals("sk-ws-devin-123", parsed.secret.apiKey)
         assertEquals("https://server.codeium.com", parsed.secret.apiServerUrl)
     }
+
+    @Test
+    fun extractsAntigravityAccountsJsonAndPackedRefreshToken() {
+        val jsonText = """
+            {
+              "version": 3,
+              "accounts": [
+                {
+                  "email": "user@example.com",
+                  "refreshToken": "1//0gToken|proj-alpha|managed-beta"
+                }
+              ]
+            }
+        """.trimIndent()
+        val parsedJson = CredentialInputParser.parse(ProviderId.ANTIGRAVITY, jsonText)
+        assertEquals("1//0gToken", parsedJson.secret.refreshToken)
+        assertEquals("managed-beta", parsedJson.secret.accountId)
+
+        val parsedRaw = CredentialInputParser.parse(ProviderId.ANTIGRAVITY, "1//0gDirect|proj-gamma")
+        assertEquals("1//0gDirect", parsedRaw.secret.refreshToken)
+        assertEquals("proj-gamma", parsedRaw.secret.accountId)
+    }
 }

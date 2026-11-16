@@ -3,11 +3,13 @@ package com.opentokenusage.android.domain.logic
 import com.opentokenusage.android.domain.model.AccountSecret
 import com.opentokenusage.android.domain.model.ProviderId
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
@@ -91,6 +93,21 @@ object CredentialInputParser {
             ProviderId.DEVIN,
         )
 
+        if (providerId == ProviderId.ANTIGRAVITY && raw.startsWith("1//")) {
+            val parts = raw.split('|')
+            val cleanRefresh = parts.first().trim()
+            val project = parts.getOrNull(2)?.trim()?.takeIf { it.isNotEmpty() }
+                ?: parts.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() }
+                ?: extraId
+            return ParsedCredentialInput(
+                secret = AccountSecret(
+                    refreshToken = cleanRefresh,
+                    accountId = project,
+                ),
+                detectedNote = "Google Refresh Token を認識しました",
+            )
+        }
+
         return if (isApiKey) {
             ParsedCredentialInput(secret = AccountSecret(apiKey = raw))
         } else {
@@ -163,6 +180,40 @@ object CredentialInputParser {
                         expiresAtMs = exp,
                     ),
                     detectedNote = "Kiro トークン JSON を読み込みました",
+                )
+            }
+            ProviderId.ANTIGRAVITY -> {
+                val firstAccount = (root["accounts"] as? JsonArray)?.firstOrNull()?.let {
+                    runCatching { it.jsonObject }.getOrNull()
+                }
+                val source = firstAccount ?: root
+                val access = (source.str("accessToken") ?: source.str("access_token") ?: source.str("access")).orEmpty()
+                val rawRefresh = (
+                    source.str("refreshToken")
+                        ?: source.str("refresh_token")
+                        ?: source.str("refresh")
+                    ).orEmpty().ifBlank { refreshOverride }
+                val refreshParts = rawRefresh.split('|')
+                val cleanRefresh = refreshParts.firstOrNull()?.trim().orEmpty()
+                val projectId = (
+                    source.str("managedProjectId")
+                        ?: source.str("projectId")
+                        ?: source.str("project_id")
+                        ?: refreshParts.getOrNull(2)?.trim()?.takeIf { it.isNotEmpty() }
+                        ?: refreshParts.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() }
+                    ).orEmpty().ifBlank { extraId }
+                val exp = source.timestampMs("expiresAt")
+                    ?: source.timestampMs("expires_at")
+                    ?: source.timestampMs("expires")
+                    ?: decodeJwtExpiryMs(access)
+                ParsedCredentialInput(
+                    secret = AccountSecret(
+                        accessToken = access,
+                        refreshToken = cleanRefresh,
+                        expiresAtMs = exp,
+                        accountId = projectId,
+                    ),
+                    detectedNote = "Antigravity 認証 JSON を読み込みました",
                 )
             }
             else -> {
