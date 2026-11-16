@@ -1,5 +1,6 @@
 package com.opentokenusage.android.data.network.clients
 
+import com.opentokenusage.android.data.auth.AntigravityOAuthConfig
 import com.opentokenusage.android.data.network.ProviderProbeException
 import com.opentokenusage.android.domain.model.AccountSecret
 import com.opentokenusage.android.domain.model.ConfiguredAccount
@@ -35,6 +36,8 @@ interface ProviderClient {
 class ProviderClientRegistry(
     httpClient: OkHttpClient,
     overrides: ProviderEndpointOverrides = ProviderEndpointOverrides(),
+    antigravityOAuthClientIdProvider: () -> String = AntigravityOAuthConfig::resolveClientId,
+    antigravityOAuthClientSecretProvider: () -> String = AntigravityOAuthConfig::resolveClientSecret,
 ) {
     private val clients: Map<String, ProviderClient> = mapOf(
         ProviderId.OPENROUTER.id to OpenRouterClient(httpClient, overrides),
@@ -54,7 +57,12 @@ class ProviderClientRegistry(
         ProviderId.MUSE.id to MuseClient(httpClient, overrides),
         ProviderId.FACTORY.id to FactoryClient(httpClient, overrides),
         ProviderId.KIRO.id to KiroClient(httpClient, overrides),
-        ProviderId.ANTIGRAVITY.id to AntigravityClient(httpClient, overrides),
+        ProviderId.ANTIGRAVITY.id to AntigravityClient(
+            httpClient,
+            overrides,
+            oauthClientIdProvider = antigravityOAuthClientIdProvider,
+            oauthClientSecretProvider = antigravityOAuthClientSecretProvider,
+        ),
     )
 
     fun clientFor(providerId: String): ProviderClient =

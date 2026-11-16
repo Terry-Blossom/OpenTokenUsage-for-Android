@@ -4,7 +4,11 @@ import com.opentokenusage.android.data.auth.AntigravityOAuthCallbackServer
 import com.opentokenusage.android.data.auth.AntigravityOAuthClient
 import com.opentokenusage.android.data.auth.AntigravityOAuthConfig
 import com.opentokenusage.android.data.auth.AntigravityPkce
+import com.opentokenusage.android.data.network.clients.AntigravityClient
 import com.opentokenusage.android.data.network.clients.ProviderEndpointOverrides
+import com.opentokenusage.android.domain.model.AccountSecret
+import com.opentokenusage.android.domain.model.ConfiguredAccount
+import com.opentokenusage.android.domain.model.ProviderId
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -168,6 +172,55 @@ class AntigravityOAuthTest {
         val res = client.exchangeCodeForTokens("code-2", "ver-2")
         assertEquals("onboarded-proj-99", res.projectId)
         assertEquals("onboarded-proj-99", res.secret.accountId)
+    }
+
+    @Test
+    fun refreshUsesRuntimeOAuthClientCredentials() = runTest {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"access_token":"ya29.refreshed","refresh_token":"1//rotated","expires_in":3600}""",
+            ),
+        )
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"cloudaicompanionProject":"project-1"}""",
+            ),
+        )
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"response":{"groups":[{"displayName":"Shared","buckets":[{"bucketId":"gemini-5h","remainingFraction":0.75,"resetTime":"2026-11-20T00:00:00Z"}]}]}}""",
+            ),
+        )
+
+        val client = AntigravityClient(
+            http = http,
+            overrides = ProviderEndpointOverrides(
+                mapOf(
+                    "google-oauth" to baseUrl,
+                    "antigravity" to baseUrl,
+                    "antigravity-daily" to baseUrl,
+                ),
+            ),
+            oauthClientIdProvider = { "runtime-client-id" },
+            oauthClientSecretProvider = { "runtime-client-secret" },
+        )
+        val nowMs = 2_000_000_000_000L
+        val result = client.probe(
+            ConfiguredAccount("a1", ProviderId.ANTIGRAVITY.id),
+            AccountSecret(
+                accessToken = "expired",
+                refreshToken = "1//refresh",
+                expiresAtMs = nowMs - 1_000L,
+            ),
+            nowMs = nowMs,
+        )
+
+        val refreshRequest = server.takeRequest()
+        assertEquals("/token", refreshRequest.path)
+        val body = refreshRequest.body.readUtf8()
+        assertTrue(body.contains("client_id=runtime-client-id"))
+        assertTrue(body.contains("client_secret=runtime-client-secret"))
+        assertEquals("ya29.refreshed", result.updatedSecret?.accessToken)
     }
 
     @Test

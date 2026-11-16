@@ -62,7 +62,6 @@ class MainActivity : ComponentActivity() {
             val lastSyncMs by repo.lastSyncMs.collectAsStateWithLifecycle()
 
             LaunchedEffect(Unit) {
-                container.antigravityOAuthSettings.load()
                 repo.initialize()
                 val interval = repo.settings.value.refreshInterval
                 val last = repo.lastSyncMs.value
