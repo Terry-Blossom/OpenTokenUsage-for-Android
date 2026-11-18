@@ -65,8 +65,46 @@ class CursorClientTest {
         val exchange = server.takeRequest()
         assertEquals("/auth/exchange_user_api_key", exchange.path)
         assertEquals("Bearer crsr_test_key", exchange.getHeader("Authorization"))
+        assertEquals("crsr_test_key", result.updatedSecret?.apiKey)
         assertEquals("cursor-session", result.updatedSecret?.accessToken)
         assertEquals(24.0, (result.lines.single() as MetricLine.Progress).used, 0.01)
+    }
+
+    @Test
+    fun reExchangesCrsrApiKeyEvenWhenStaleRefreshTokenIsStored() = runTest {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"accessToken":"cursor-session-2","refreshToken":"cursor-refresh-2"}""",
+            ),
+        )
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"billingCycleStart":"2026-10-18T06:32:13Z","billingCycleEnd":"2026-10-25T06:32:13Z","planUsage":{"totalPercentUsed":15}}""",
+            ),
+        )
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"isMerged":true,"planInfo":{"planName":"Premium"}}""",
+            ),
+        )
+
+        val result = client().probe(
+            ConfiguredAccount("c1", ProviderId.CURSOR.id),
+            AccountSecret(
+                apiKey = "crsr_test_key",
+                accessToken = "expired-session",
+                refreshToken = "stale-refresh-jwt",
+                expiresAtMs = 1_000L,
+            ),
+            nowMs = 2_000_000L,
+        )
+
+        val exchange = server.takeRequest()
+        assertEquals("/auth/exchange_user_api_key", exchange.path)
+        assertEquals("Bearer crsr_test_key", exchange.getHeader("Authorization"))
+        assertEquals("crsr_test_key", result.updatedSecret?.apiKey)
+        assertEquals("cursor-session-2", result.updatedSecret?.accessToken)
+        assertEquals(15.0, (result.lines.single() as MetricLine.Progress).used, 0.01)
     }
 
     @Test
