@@ -149,7 +149,7 @@ class GrokClient(
         var access = cur.accessToken.trim()
         val refresh = cur.refreshToken.trim()
         if (access.isEmpty() && refresh.isEmpty()) {
-            throw ProviderProbeException("Grok の認証トークンが未設定です", isAuthError = true)
+            throw ProviderProbeException("Grok (xAI) の認証トークンが未設定です", isAuthError = true)
         }
         var updated: AccountSecret? = null
         val exp = cur.expiresAtMs ?: CredentialInputParser.decodeJwtExpiryMs(access)
@@ -177,11 +177,20 @@ class GrokClient(
             )
         }
         if (resp.statusCode == 401 || resp.statusCode == 403) {
-            throw ProviderProbeException("Grok のセッションが期限切れです", isAuthError = true)
+            throw ProviderProbeException(
+                "Grok (xAI) の認証またはセッションが期限切れです",
+                isAuthError = true,
+                statusCode = resp.statusCode,
+            )
         }
-        if (resp.statusCode !in 200..299) throw ProviderProbeException("Grok 取得失敗 (HTTP ${resp.statusCode})")
+        if (resp.statusCode !in 200..299) {
+            throw ProviderProbeException(
+                "Grok (xAI) の利用状況取得に失敗しました (HTTP ${resp.statusCode})",
+                statusCode = resp.statusCode,
+            )
+        }
         val data = ProviderHttpSupport.tryParseObject(resp.bodyText)
-            ?: throw ProviderProbeException("Grok レスポンス解析失敗")
+            ?: throw ProviderProbeException("Grok (xAI) のレスポンス解析に失敗しました")
 
         val lines = mutableListOf<MetricLine>()
         val rem = data.doubleOrNull("remaining_credits") ?: data.doubleOrNull("remainingCredits")
@@ -211,7 +220,7 @@ class GrokClient(
             }
         }
         val plan = data.strOrNull("tier") ?: data.strOrNull("plan")
-        if (lines.isEmpty()) throw ProviderProbeException("Grok の利用情報が見つかりません")
+        if (lines.isEmpty()) throw ProviderProbeException("Grok (xAI) の利用情報が見つかりません")
         return ProbeResult(plan = plan, lines = lines, updatedSecret = updated)
     }
 
@@ -230,7 +239,7 @@ class GrokClient(
                 http,
                 base,
                 currentSecret,
-                currentSecret.refreshToken.ifBlank { cursorApiKey },
+                cursorApiKey,
             )
             updatedSecret = currentSecret
             accessToken = currentSecret.accessToken
@@ -249,22 +258,40 @@ class GrokClient(
                 http,
                 base,
                 currentSecret,
-                currentSecret.refreshToken.ifBlank { cursorApiKey },
+                cursorApiKey,
             )
             updatedSecret = currentSecret
             accessToken = currentSecret.accessToken
             response = fetchGrokBotUsage(accessToken)
         }
         if (response.statusCode == 401 || response.statusCode == 403) {
-            throw ProviderProbeException("Cursor API キー/トークンの認証に失敗しました", isAuthError = true, statusCode = response.statusCode)
+            throw ProviderProbeException(
+                "Cursor Grok Bot の利用枠を取得できませんでした (HTTP ${response.statusCode})。この Cursor プランに独立した Grok Bot 枠がない可能性があります（Cursor の共有週次プールをご確認ください）。",
+                isAuthError = false,
+                statusCode = response.statusCode,
+            )
         }
         if (response.statusCode !in 200..299) {
-            throw ProviderProbeException("Cursor Grok Bot の取得に失敗 (HTTP ${response.statusCode})", statusCode = response.statusCode)
+            throw ProviderProbeException(
+                "Cursor Grok Bot 利用枠の取得に失敗しました (HTTP ${response.statusCode})",
+                statusCode = response.statusCode,
+            )
         }
         val usage = ProviderHttpSupport.tryParseObject(response.bodyText)
-            ?: throw ProviderProbeException("Cursor Grok Bot のレスポンス解析に失敗しました")
-        val percent = usage.doubleOrNull("usagePercent")
-            ?: throw ProviderProbeException("Cursor Grok Bot の利用率が見つかりません")
+            ?: throw ProviderProbeException("Cursor Grok Bot 利用枠のレスポンス解析に失敗しました")
+        if (usage.boolOrNull("usesPooledEnterpriseAllowance") == true ||
+            usage.boolOrNull("hasNonZeroIncludedLimit") == false
+        ) {
+            throw ProviderProbeException(
+                "この Cursor プランに独立した Cursor Grok Bot の利用枠はありません。Cursor の共有週次プールをご確認ください。",
+                isAuthError = false,
+            )
+        }
+        val percent = usage.doubleOrNull("usagePercent")?.takeIf { it >= 0.0 }
+            ?: throw ProviderProbeException(
+                "Cursor Grok Bot の利用枠が見つかりませんでした。この Cursor プランに独立した Grok Bot 枠がない可能性があります（Cursor の共有週次プールをご確認ください）。",
+                isAuthError = false,
+            )
         val line = MetricLine.Progress(
             label = "Grok Bot",
             used = percent.coerceIn(0.0, 100.0),
@@ -283,11 +310,22 @@ class GrokClient(
         val form = "grant_type=refresh_token&client_id=b1a00492-073a-47ea-816f-4c329264a828&refresh_token=${URLEncoder.encode(secret.refreshToken, "UTF-8")}"
         val resp = ProviderHttpSupport.postForm(http, "$authBase/oauth2/token", form)
         if (resp.statusCode == 400 || resp.statusCode == 401 || resp.statusCode == 403) {
-            throw ProviderProbeException("Grok セッション更新に失敗しました", isAuthError = true)
+            throw ProviderProbeException(
+                "Grok (xAI) のセッション更新（認証）に失敗しました",
+                isAuthError = true,
+                statusCode = resp.statusCode,
+            )
         }
-        if (resp.statusCode !in 200..299) throw ProviderProbeException("Grok 更新エラー (HTTP ${resp.statusCode})")
-        val obj = ProviderHttpSupport.tryParseObject(resp.bodyText) ?: throw ProviderProbeException("Grok 更新レスポンス不正")
-        val access = obj.strOrNull("access_token") ?: throw ProviderProbeException("Grok access_token 欠落")
+        if (resp.statusCode !in 200..299) {
+            throw ProviderProbeException(
+                "Grok (xAI) のセッション更新に失敗しました (HTTP ${resp.statusCode})",
+                statusCode = resp.statusCode,
+            )
+        }
+        val obj = ProviderHttpSupport.tryParseObject(resp.bodyText)
+            ?: throw ProviderProbeException("Grok (xAI) の更新レスポンスが不正です")
+        val access = obj.strOrNull("access_token")
+            ?: throw ProviderProbeException("Grok (xAI) の更新レスポンスに access_token がありません")
         val refresh = obj.strOrNull("refresh_token") ?: secret.refreshToken
         val exp = obj.doubleOrNull("expires_in")?.toLong()?.let { System.currentTimeMillis() + it * 1000L }
             ?: CredentialInputParser.decodeJwtExpiryMs(access)

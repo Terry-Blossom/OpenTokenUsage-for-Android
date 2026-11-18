@@ -154,7 +154,7 @@ class CursorClient(
                 http,
                 api2Base,
                 currentSecret,
-                currentSecret.refreshToken.ifBlank { cursorApiKey },
+                cursorApiKey,
             )
             updatedSecret = currentSecret
             accessToken = currentSecret.accessToken
@@ -206,7 +206,7 @@ class CursorClient(
                         http,
                         api2Base,
                         currentSecret,
-                        currentSecret.refreshToken.ifBlank { cursorApiKey },
+                        cursorApiKey,
                     )
                 } else {
                     refreshCursor(api2Base, currentSecret)
@@ -487,17 +487,28 @@ internal suspend fun exchangeCursorCredential(
         mapOf("Authorization" to "Bearer $credential", "Accept" to "application/json"),
     )
     if (response.statusCode == 401 || response.statusCode == 403) {
-        throw ProviderProbeException("Cursor API キー/トークンの認証に失敗しました", isAuthError = true, statusCode = response.statusCode)
+        val fallbackKey = secret.apiKey.trim().takeIf { it.startsWith("crsr_") }
+        if (fallbackKey != null && fallbackKey != credential) {
+            return exchangeCursorCredential(http, base, secret, fallbackKey)
+        }
+        throw ProviderProbeException(
+            "Cursor API キー（crsr_）の交換または認証に失敗しました",
+            isAuthError = true,
+            statusCode = response.statusCode,
+        )
     }
     if (response.statusCode !in 200..299) {
-        throw ProviderProbeException("Cursor API キー/トークンの交換に失敗しました (HTTP ${response.statusCode})", statusCode = response.statusCode)
+        throw ProviderProbeException(
+            "Cursor API キー（crsr_）の交換に失敗しました (HTTP ${response.statusCode})",
+            statusCode = response.statusCode,
+        )
     }
     val obj = ProviderHttpSupport.tryParseObject(response.bodyText)
-        ?: throw ProviderProbeException("Cursor API キー/トークン交換レスポンスの解析に失敗しました")
+        ?: throw ProviderProbeException("Cursor API キー（crsr_）交換レスポンスの解析に失敗しました")
     val accessToken = obj.strOrNull("accessToken")
         ?: obj.strOrNull("access_token")
         ?: obj.strOrNull("token")
-        ?: throw ProviderProbeException("Cursor API キー/トークン交換レスポンスにアクセストークンがありません")
+        ?: throw ProviderProbeException("Cursor API キー（crsr_）交換レスポンスにアクセストークンがありません")
     val refreshToken = obj.strOrNull("refreshToken") ?: obj.strOrNull("refresh_token")
     return secret.copy(
         accessToken = accessToken,
