@@ -7,4 +7,5 @@
     <string name="widget_single_description">選択した1つのAIアカウントの使用状況をコンパクトに表示します。</string>
     <string name="widget_status_strip_label">AI使用状況 通知バー風</string>
     <string name="widget_status_strip_description">通知バーと同じプロバイダーアイコンと使用率を1x3で表示します。</string>
+    <string name="qs_tile_label">AI使用率</string>
 </resources>

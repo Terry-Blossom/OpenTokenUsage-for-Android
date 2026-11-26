@@ -23,6 +23,7 @@ import com.opentokenusage.android.domain.model.MiniMaxRegion
 import com.opentokenusage.android.domain.model.ProviderId
 import com.opentokenusage.android.domain.model.ProviderSnapshot
 import com.opentokenusage.android.domain.model.UsageHistoryEntry
+import com.opentokenusage.android.tile.UsageQuickSettingsTileService
 import com.opentokenusage.android.util.NotificationHelper
 import com.opentokenusage.android.widget.UsageOverviewWidget
 import com.opentokenusage.android.widget.UsageSingleWidget
@@ -124,6 +125,7 @@ class UsageRepository(
         runCatching {
             notificationHelper.updatePersistentNotification(orderedDisplaySnapshots(), _settings.value)
         }
+        UsageQuickSettingsTileService.requestListeningState(context)
     }
 
     /** Tests connection cleanly without persisting yet; throws ProviderProbeException on failure. */
@@ -483,6 +485,7 @@ class UsageRepository(
         runCatching {
             notificationHelper.updatePersistentNotification(orderedDisplaySnapshots(), _settings.value)
         }
+        UsageQuickSettingsTileService.requestListeningState(context)
     }
 
     private companion object {
