@@ -68,6 +68,8 @@ import com.opentokenusage.android.data.update.ApkInstaller
 import com.opentokenusage.android.data.update.AppUpdater
 import com.opentokenusage.android.data.update.AvailableUpdate
 import com.opentokenusage.android.domain.logic.CurrencyFormatter
+import com.opentokenusage.android.domain.logic.ManualUsdRateInputController
+import com.opentokenusage.android.domain.logic.ManualUsdRateUpdate
 import com.opentokenusage.android.domain.model.AppSettings
 import com.opentokenusage.android.domain.model.AppThemeMode
 import com.opentokenusage.android.domain.model.ConfiguredAccount
@@ -105,8 +107,12 @@ fun SettingsScreen(
     val colors = LocalOtuColors.current
     val context = LocalContext.current
     var widgetPinMessage by remember { mutableStateOf<String?>(null) }
-    var manualRateInput by remember(settings.manualUsdRate) {
-        mutableStateOf(settings.manualUsdRate?.toString().orEmpty())
+    val manualRateController = remember { ManualUsdRateInputController(settings.manualUsdRate) }
+    var manualRateInput by remember { mutableStateOf(manualRateController.text) }
+    LaunchedEffect(settings.manualUsdRate) {
+        manualRateController.onExternalRateChanged(settings.manualUsdRate)?.let { synced ->
+            manualRateInput = synced
+        }
     }
 
     var pendingNotificationAction by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -435,10 +441,12 @@ fun SettingsScreen(
                     ) {
                         OutlinedTextField(
                             value = manualRateInput,
-                            onValueChange = {
-                                manualRateInput = it
-                                val num = it.trim().toDoubleOrNull()?.takeIf { r -> r > 0.0 }
-                                onUpdateSettings { s -> s.copy(manualUsdRate = num) }
+                            onValueChange = { nextText ->
+                                manualRateInput = nextText
+                                val update = manualRateController.onUserInput(nextText)
+                                if (update is ManualUsdRateUpdate.Commit) {
+                                    onUpdateSettings { s -> s.copy(manualUsdRate = update.rate) }
+                                }
                             },
                             label = { Text("手動 USD→${settings.displayCurrency} レート（任意）") },
                             placeholder = { Text("空欄で自動レート") },
