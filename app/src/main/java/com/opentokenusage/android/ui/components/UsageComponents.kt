@@ -475,7 +475,25 @@ fun ProviderCard(
                                 }
                             }
 
-                            is MetricLine.ResetCredit -> Unit
+                            is MetricLine.ResetCredit -> {
+                                val activeCount = line.activeCount(nowMs)
+                                if (activeCount > 0) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(line.label, color = colors.textSecondary, fontSize = 12.sp)
+                                        Text(
+                                            text = "${activeCount} 回利用可能",
+                                            style = tnumStyle,
+                                            color = colors.textPrimary,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }

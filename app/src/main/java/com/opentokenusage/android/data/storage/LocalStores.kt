@@ -4,6 +4,7 @@ import android.content.Context
 import com.opentokenusage.android.domain.model.AppSettings
 import com.opentokenusage.android.domain.model.ConfiguredAccount
 import com.opentokenusage.android.domain.model.ProviderSnapshot
+import com.opentokenusage.android.domain.model.ResetCreditItem
 import com.opentokenusage.android.domain.model.UsageHistoryEntry
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -11,6 +12,33 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
+
+@Serializable
+data class CachedClaudeResetGrants(
+    val checkedAtMs: Long = 0L,
+    val eligible: Boolean = false,
+    val items: List<ResetCreditItem> = emptyList(),
+)
+
+interface ClaudeResetGrantsCache {
+    suspend fun load(accountId: String): CachedClaudeResetGrants?
+    suspend fun save(accountId: String, entry: CachedClaudeResetGrants)
+    suspend fun delete(accountId: String)
+}
+
+class InMemoryClaudeResetGrantsCache : ClaudeResetGrantsCache {
+    private val map = java.util.concurrent.ConcurrentHashMap<String, CachedClaudeResetGrants>()
+
+    override suspend fun load(accountId: String): CachedClaudeResetGrants? = map[accountId]
+
+    override suspend fun save(accountId: String, entry: CachedClaudeResetGrants) {
+        map[accountId] = entry
+    }
+
+    override suspend fun delete(accountId: String) {
+        map.remove(accountId)
+    }
+}
 
 @Serializable
 data class FxRateCache(
@@ -31,7 +59,7 @@ data class AlertDedupeState(
 class LocalAppStores(
     context: Context,
     private val json: Json,
-) {
+) : ClaudeResetGrantsCache {
     private val dir = File(context.applicationContext.filesDir, "otu_store").apply { mkdirs() }
     private val ioMutex = Mutex()
 
@@ -42,6 +70,7 @@ class LocalAppStores(
     private val widgetBindingsFile = File(dir, "widget_bindings.json")
     private val fxRatesFile = File(dir, "fx_rates.json")
     private val alertStateFile = File(dir, "alerts.json")
+    private val claudeResetGrantsFile = File(dir, "claude_reset_grants.json")
 
     suspend fun loadAccounts(): List<ConfiguredAccount> = ioMutex.withLock {
         readJson(accountsFile) ?: emptyList()
@@ -123,6 +152,23 @@ class LocalAppStores(
 
     suspend fun saveAlertState(state: AlertDedupeState) = ioMutex.withLock {
         writeJsonAtomic(alertStateFile, state)
+    }
+
+    override suspend fun load(accountId: String): CachedClaudeResetGrants? = ioMutex.withLock {
+        readJson<Map<String, CachedClaudeResetGrants>>(claudeResetGrantsFile)?.get(accountId)
+    }
+
+    override suspend fun save(accountId: String, entry: CachedClaudeResetGrants) = ioMutex.withLock {
+        val current = (readJson<Map<String, CachedClaudeResetGrants>>(claudeResetGrantsFile) ?: emptyMap()).toMutableMap()
+        current[accountId] = entry
+        writeJsonAtomic(claudeResetGrantsFile, current)
+    }
+
+    override suspend fun delete(accountId: String) = ioMutex.withLock {
+        val current = (readJson<Map<String, CachedClaudeResetGrants>>(claudeResetGrantsFile) ?: emptyMap()).toMutableMap()
+        if (current.remove(accountId) != null) {
+            writeJsonAtomic(claudeResetGrantsFile, current)
+        }
     }
 
     private inline fun <reified T> readJson(file: File): T? {

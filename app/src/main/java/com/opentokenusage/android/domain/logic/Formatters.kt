@@ -195,4 +195,32 @@ object UsageDisplayFormatter {
         val fmt = DateTimeFormatter.ofPattern(if (clock24h) "HH:mm" else "h:mm", Locale.JAPAN)
         return Instant.ofEpochMilli(timestampMs).atZone(zoneId).format(fmt)
     }
+
+    fun resetCreditKindLabelJa(kind: String?): String = when (kind) {
+        "fable" -> "Fable リセット"
+        "session" -> "5時間枠リセット"
+        "weekly" -> "週間枠リセット"
+        "full" -> "全体リセット"
+        else -> "リセット"
+    }
+
+    fun resetCreditKindDescriptionJa(kind: String?): String? = when (kind) {
+        "fable" -> "5時間枠・Fable枠をリセット（週間枠はFable使用分のみ返還）"
+        else -> null
+    }
+
+    fun formatResetCreditExpiryJa(
+        expiresAtMs: Long?,
+        nowMs: Long,
+        clock24h: Boolean,
+        zoneId: ZoneId = ZoneId.systemDefault(),
+    ): String {
+        if (expiresAtMs == null) return "期限不明"
+        val diff = expiresAtMs - nowMs
+        if (diff <= 0L) return "期限切れ"
+        val target = Instant.ofEpochMilli(expiresAtMs).atZone(zoneId)
+        val dateFmt = DateTimeFormatter.ofPattern("M/d", Locale.JAPAN)
+        val timeFmt = DateTimeFormatter.ofPattern(if (clock24h) "HH:mm" else "a h:mm", Locale.JAPAN)
+        return "あと${formatDurationJa(diff)} (${target.format(dateFmt)} ${target.format(timeFmt)} まで)"
+    }
 }

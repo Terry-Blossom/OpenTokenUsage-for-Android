@@ -19,6 +19,32 @@ sealed class MetricFormat {
 }
 
 @Serializable
+data class ResetCreditItem(
+    val count: Int = 1,
+    val expiresAtMs: Long? = null,
+    val kind: String? = null,
+)
+
+fun groupResetCreditItems(items: List<ResetCreditItem>): List<ResetCreditItem> {
+    if (items.isEmpty()) return emptyList()
+    val grouped = linkedMapOf<Pair<String?, Long?>, Int>()
+    for (item in items) {
+        if (item.count <= 0) continue
+        val key = item.kind to item.expiresAtMs
+        grouped[key] = (grouped[key] ?: 0) + item.count
+    }
+    return grouped.entries
+        .map { (key, count) -> ResetCreditItem(count = count, expiresAtMs = key.second, kind = key.first) }
+        .sortedWith(
+            compareBy<ResetCreditItem>(
+                { it.expiresAtMs == null },
+                { it.expiresAtMs ?: Long.MAX_VALUE },
+                { it.kind ?: "" },
+            ),
+        )
+}
+
+@Serializable
 sealed class MetricLine {
     abstract val label: String
     abstract val scope: String // "overview" or "detail"
@@ -76,11 +102,24 @@ sealed class MetricLine {
     @SerialName("resetCredit")
     data class ResetCredit(
         override val label: String,
-        val amount: Double,
+        val amount: Double = 0.0,
         val currencySymbol: String = "$",
         val expiresAtMs: Long? = null,
+        val availableCount: Int = 0,
+        val items: List<ResetCreditItem> = emptyList(),
         override val scope: String = "detail",
-    ) : MetricLine()
+    ) : MetricLine() {
+        fun activeItems(nowMs: Long): List<ResetCreditItem> =
+            if (items.isNotEmpty()) {
+                items.filter { it.count > 0 && (it.expiresAtMs == null || it.expiresAtMs > nowMs) }
+            } else if (availableCount > 0 && (expiresAtMs == null || expiresAtMs > nowMs)) {
+                listOf(ResetCreditItem(count = availableCount, expiresAtMs = expiresAtMs))
+            } else {
+                emptyList()
+            }
+
+        fun activeCount(nowMs: Long): Int = activeItems(nowMs).sumOf { it.count }
+    }
 }
 
 @Serializable

@@ -41,6 +41,7 @@ class AppContainer(application: Application) {
             httpClient = httpClient,
             antigravityOAuthClientIdProvider = { antigravityOAuthSettings.current().clientId },
             antigravityOAuthClientSecretProvider = { antigravityOAuthSettings.current().clientSecret },
+            claudeResetGrantsCache = stores,
         )
     }
     val antigravityOAuthClient by lazy {

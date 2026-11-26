@@ -261,6 +261,7 @@ class UsageRepository(
         secretsStore.deleteSecret(accountId)
         gateStore.clear(accountId)
         stores.deleteAccountHistory(accountId)
+        stores.delete(accountId)
 
         val currentSnaps = _snapshots.value.toMutableMap()
         currentSnaps.remove(accountId)

@@ -2,6 +2,8 @@ package com.opentokenusage.android.data.network.clients
 
 import com.opentokenusage.android.data.auth.AntigravityOAuthConfig
 import com.opentokenusage.android.data.network.ProviderProbeException
+import com.opentokenusage.android.data.storage.ClaudeResetGrantsCache
+import com.opentokenusage.android.data.storage.InMemoryClaudeResetGrantsCache
 import com.opentokenusage.android.domain.model.AccountSecret
 import com.opentokenusage.android.domain.model.ConfiguredAccount
 import com.opentokenusage.android.domain.model.MetricLine
@@ -38,6 +40,7 @@ class ProviderClientRegistry(
     overrides: ProviderEndpointOverrides = ProviderEndpointOverrides(),
     antigravityOAuthClientIdProvider: () -> String = AntigravityOAuthConfig::resolveClientId,
     antigravityOAuthClientSecretProvider: () -> String = AntigravityOAuthConfig::resolveClientSecret,
+    claudeResetGrantsCache: ClaudeResetGrantsCache = InMemoryClaudeResetGrantsCache(),
 ) {
     private val clients: Map<String, ProviderClient> = mapOf(
         ProviderId.OPENROUTER.id to OpenRouterClient(httpClient, overrides),
@@ -48,7 +51,7 @@ class ProviderClientRegistry(
         ProviderId.OPENCODE_GO.id to OpenCodeGoClient(httpClient, overrides),
         ProviderId.AMP.id to AmpClient(httpClient, overrides),
         ProviderId.DEVIN.id to DevinClient(httpClient, overrides),
-        ProviderId.CLAUDE.id to ClaudeClient(httpClient, overrides),
+        ProviderId.CLAUDE.id to ClaudeClient(httpClient, overrides, claudeResetGrantsCache),
         ProviderId.CODEX.id to CodexClient(httpClient, overrides),
         ProviderId.COPILOT.id to CopilotClient(httpClient, overrides),
         ProviderId.CURSOR.id to CursorClient(httpClient, overrides),

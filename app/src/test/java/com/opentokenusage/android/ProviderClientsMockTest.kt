@@ -82,6 +82,9 @@ class ProviderClientsMockTest {
                 """{"organization":{"plan_display_name":"Claude Max"}}""",
             ),
         )
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody("""{"cedar_ember":null}"""),
+        )
         val client = ClaudeClient(
             http,
             ProviderEndpointOverrides(mapOf("claude" to baseUrl, "claude-oauth" to baseUrl)),

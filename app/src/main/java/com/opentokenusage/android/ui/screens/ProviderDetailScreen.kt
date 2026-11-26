@@ -306,9 +306,15 @@ fun ProviderDetailScreen(
                             is MetricLine.Text -> Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(line.label, color = colors.textSecondary, fontSize = 13.sp)
-                                Text(line.value, style = tnum, color = colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(line.value, style = tnum, color = colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                    if (!line.subtitle.isNullOrBlank()) {
+                                        Text(line.subtitle, color = colors.textMuted, fontSize = 11.sp)
+                                    }
+                                }
                             }
                             is MetricLine.Badge -> Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -330,12 +336,65 @@ fun ProviderDetailScreen(
                                 Text(line.label, color = colors.textSecondary, fontSize = 12.sp)
                                 UsageSparklineChart(values = line.values, barColor = barColor)
                             }
-                            is MetricLine.ResetCredit -> Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                            ) {
-                                Text(line.label, color = colors.textSecondary, fontSize = 12.sp)
-                                Text("${line.currencySymbol}${line.amount}", color = colors.textPrimary, fontSize = 12.sp)
+                            is MetricLine.ResetCredit -> {
+                                val activeItems = line.activeItems(nowMs)
+                                val activeCount = line.activeCount(nowMs)
+                                if (activeCount > 0) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Text(line.label, color = colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                            Text("${activeCount} 回利用可能", style = tnum, color = colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                        activeItems.forEach { item ->
+                                            val itemLabel = if (item.kind != null) {
+                                                "${UsageDisplayFormatter.resetCreditKindLabelJa(item.kind)} ×${item.count}"
+                                            } else {
+                                                "${item.count} 回"
+                                            }
+                                            val remainingMs = item.expiresAtMs?.let { it - nowMs }
+                                            val expiryColor = when {
+                                                remainingMs == null -> colors.textMuted
+                                                remainingMs <= 24L * 3600_000L -> colors.paceRed
+                                                remainingMs <= 7L * 24L * 3600_000L -> colors.paceYellow
+                                                else -> colors.textMuted
+                                            }
+                                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                ) {
+                                                    Text(itemLabel, color = colors.textSecondary, fontSize = 12.sp)
+                                                    Text(
+                                                        text = UsageDisplayFormatter.formatResetCreditExpiryJa(
+                                                            item.expiresAtMs,
+                                                            nowMs,
+                                                            settings.clock24h,
+                                                        ),
+                                                        style = tnum,
+                                                        color = expiryColor,
+                                                        fontSize = 11.sp,
+                                                    )
+                                                }
+                                                UsageDisplayFormatter.resetCreditKindDescriptionJa(item.kind)?.let { desc ->
+                                                    Text(desc, color = colors.textMuted, fontSize = 10.sp)
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else if (line.amount > 0.0) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                    ) {
+                                        Text(line.label, color = colors.textSecondary, fontSize = 12.sp)
+                                        Text("${line.currencySymbol}${line.amount}", color = colors.textPrimary, fontSize = 12.sp)
+                                    }
+                                }
                             }
                         }
                     }
