@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Build
+import android.util.TypedValue
 import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -65,7 +66,7 @@ class NotificationHelper(private val context: Context) {
         }
         if (!canPostNotifications()) return
 
-        val rows = usageStatusEntries(snapshots)
+        val rows = usageStatusEntries(snapshots, includeMonthly = settings.showMonthlyUsage)
         if (rows.isEmpty()) {
             cancelPersistentNotification()
             return
@@ -81,12 +82,16 @@ class NotificationHelper(private val context: Context) {
 
         val remoteViews = RemoteViews(context.packageName, R.layout.notification_usage_strip)
         val slots = listOf(
-            StatusSlot(R.id.usage_slot_1, R.id.usage_icon_1, R.id.usage_percent_1, R.id.usage_weekly_1),
-            StatusSlot(R.id.usage_slot_2, R.id.usage_icon_2, R.id.usage_percent_2, R.id.usage_weekly_2),
-            StatusSlot(R.id.usage_slot_3, R.id.usage_icon_3, R.id.usage_percent_3, R.id.usage_weekly_3),
+            StatusSlot(R.id.usage_slot_1, R.id.usage_icon_1, R.id.usage_percent_1, R.id.usage_weekly_1, R.id.usage_monthly_1),
+            StatusSlot(R.id.usage_slot_2, R.id.usage_icon_2, R.id.usage_percent_2, R.id.usage_weekly_2, R.id.usage_monthly_2),
+            StatusSlot(R.id.usage_slot_3, R.id.usage_icon_3, R.id.usage_percent_3, R.id.usage_weekly_3, R.id.usage_monthly_3),
         )
         rows.forEachIndexed { index, entry ->
             val slot = slots[index]
+            val sizes = statusStripTextSizesSp(
+                hasWeekly = entry.weekly != null,
+                hasMonthly = entry.monthly != null,
+            )
             remoteViews.setViewVisibility(slot.container, android.view.View.VISIBLE)
             remoteViews.setImageViewResource(slot.icon, ProviderVisuals.iconRes(entry.snapshot.providerId))
             remoteViews.setInt(
@@ -94,19 +99,40 @@ class NotificationHelper(private val context: Context) {
                 "setColorFilter",
                 usageStatusIconColor(entry.snapshot.providerId, darkStripBackground),
             )
-            entry.lines.forEachIndexed { lineIndex, line ->
-                val textId = if (lineIndex == 0) slot.primary else slot.weekly
-                remoteViews.setViewVisibility(textId, android.view.View.VISIBLE)
-                remoteViews.setTextViewText(textId, percentText(line, settings))
+
+            remoteViews.setViewVisibility(slot.primary, android.view.View.VISIBLE)
+            remoteViews.setTextViewText(slot.primary, percentText(entry.primary, settings))
+            remoteViews.setTextColor(
+                slot.primary,
+                usageStatusTextColor(entry.primary.usedFraction, baseTextColor, stripBackground),
+            )
+            if (entry.monthly != null) {
+                remoteViews.setTextViewTextSize(slot.primary, TypedValue.COMPLEX_UNIT_SP, sizes.primarySp)
+            }
+
+            entry.weekly?.let { weekly ->
+                remoteViews.setViewVisibility(slot.weekly, android.view.View.VISIBLE)
+                remoteViews.setTextViewText(slot.weekly, percentText(weekly, settings))
                 remoteViews.setTextColor(
-                    textId,
-                    usageStatusTextColor(line.usedFraction, baseTextColor, stripBackground),
+                    slot.weekly,
+                    usageStatusTextColor(weekly.usedFraction, baseTextColor, stripBackground),
+                )
+                if (entry.monthly != null) {
+                    remoteViews.setTextViewTextSize(slot.weekly, TypedValue.COMPLEX_UNIT_SP, sizes.weeklySp)
+                }
+            }
+
+            entry.monthly?.let { monthly ->
+                remoteViews.setViewVisibility(slot.monthly, android.view.View.VISIBLE)
+                remoteViews.setTextViewText(slot.monthly, formatMonthlyStatusText(monthly, settings.displayMode))
+                remoteViews.setTextViewTextSize(slot.monthly, TypedValue.COMPLEX_UNIT_SP, sizes.monthlySp)
+                remoteViews.setTextColor(
+                    slot.monthly,
+                    usageStatusTextColor(monthly.usedFraction, baseTextColor, stripBackground),
                 )
             }
         }
-        val preview = rows.joinToString(" · ") { entry ->
-            "${entry.snapshot.displayName} ${entry.lines.joinToString(" / ") { percentText(it, settings) }}"
-        }
+        val preview = formatStatusPreviewText(rows, settings.displayMode)
         val updatedAt = snapshots.maxOfOrNull { it.fetchedAtMs }
             ?.takeIf { it > 0L }
             ?.let { "更新 ${UsageDisplayFormatter.formatTimeHm(it, settings.clock24h)}" }
@@ -259,5 +285,11 @@ class NotificationHelper(private val context: Context) {
         private const val PERSISTENT_ID = 1201
     }
 
-    private data class StatusSlot(val container: Int, val icon: Int, val primary: Int, val weekly: Int)
+    private data class StatusSlot(
+        val container: Int,
+        val icon: Int,
+        val primary: Int,
+        val weekly: Int,
+        val monthly: Int,
+    )
 }

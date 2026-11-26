@@ -1,9 +1,12 @@
 package com.opentokenusage.android
 
+import com.opentokenusage.android.data.network.ProviderHttpSupport
 import com.opentokenusage.android.domain.model.AppSettings
 import com.opentokenusage.android.domain.model.RefreshIntervalOption
 import com.opentokenusage.android.domain.model.UsageDisplayMode
+import kotlinx.serialization.encodeToString
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -16,7 +19,18 @@ class EmptyDefaultsTest {
         val defaults = AppSettings()
         assertEquals(UsageDisplayMode.LEFT, defaults.displayMode)
         assertEquals(RefreshIntervalOption.MIN_15, defaults.refreshInterval)
+        assertFalse(defaults.showMonthlyUsage)
         assertTrue(defaults.alertThreshold1 in 1..99)
         assertTrue(defaults.alertThreshold2 in 1..99)
+    }
+
+    @Test
+    fun settingsSerializationDefaultsAndPersistsShowMonthlyUsage() {
+        val legacyDecoded = ProviderHttpSupport.json.decodeFromString<AppSettings>("""{"persistentNotificationEnabled":true}""")
+        assertFalse(legacyDecoded.showMonthlyUsage)
+
+        val encoded = ProviderHttpSupport.json.encodeToString(AppSettings(showMonthlyUsage = true))
+        val roundTripped = ProviderHttpSupport.json.decodeFromString<AppSettings>(encoded)
+        assertTrue(roundTripped.showMonthlyUsage)
     }
 }

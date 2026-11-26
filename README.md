@@ -15,6 +15,7 @@ Android companion app and home-screen widgets inspired by [PowerUserZ/OpenTokenU
 - **Direct Provider Support**: Supports direct API key / OAuth / session credential entry and encrypted local storage via AndroidX Security Crypto (`EncryptedSharedPreferences`).
 - **Cursor X Subscription aware**: On the new Cursor X Subscription plans, only the shared weekly pool (`Total usage`) is shown; legacy plan, on-demand, and Grok Bot lines are hidden.
 - **Persistent notification**: Optional ongoing notification in the status bar with the latest usage per account, refreshed by the background schedule.
+- **Optional monthly usage line**: Optionally shows a compact monthly usage line below the weekly percentage in the persistent notification and 1x3 status strip widget for providers with monthly quotas.
 - **Background Refresh**: Periodic updates powered by `WorkManager` with pace calculation (`PaceCalculator`).
 
 ## Tech Stack

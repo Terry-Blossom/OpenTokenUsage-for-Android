@@ -279,6 +279,16 @@ fun SettingsScreen(
                     checked = settings.workdaysOnlyWeeklyPace,
                     onCheckedChange = { v -> onUpdateSettings { it.copy(workdaysOnlyWeeklyPace = v) } },
                 )
+                SwitchRow(
+                    title = "月の使用量を表示",
+                    checked = settings.showMonthlyUsage,
+                    onCheckedChange = { v -> onUpdateSettings { it.copy(showMonthlyUsage = v) } },
+                )
+                Text(
+                    "通知バー常時表示と通知バー風（1x3）ウィジェットで、月間枠があるプロバイダーの月表示を週の下に追加します。",
+                    color = colors.textMuted,
+                    fontSize = 11.sp,
+                )
 
                 Text("リセット時刻表示", color = colors.textSecondary, fontSize = 12.sp)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

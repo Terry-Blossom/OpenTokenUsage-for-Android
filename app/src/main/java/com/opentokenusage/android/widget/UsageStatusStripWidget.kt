@@ -40,6 +40,8 @@ import com.opentokenusage.android.domain.model.AppSettings
 import com.opentokenusage.android.domain.model.AppThemeMode
 import com.opentokenusage.android.ui.theme.ProviderVisuals
 import com.opentokenusage.android.util.UsageStatusEntry
+import com.opentokenusage.android.util.formatMonthlyStatusText
+import com.opentokenusage.android.util.statusStripTextSizesSp
 import com.opentokenusage.android.util.usageStatusEntries
 import com.opentokenusage.android.util.usageStatusIconColor
 import com.opentokenusage.android.util.usageStatusTextColor
@@ -57,7 +59,10 @@ class UsageStatusStripWidget : GlanceAppWidget() {
         repo?.initialize()
 
         val settings = repo?.settings?.value ?: AppSettings()
-        val entries = usageStatusEntries(repo?.orderedDisplaySnapshots().orEmpty())
+        val entries = usageStatusEntries(
+            snapshots = repo?.orderedDisplaySnapshots().orEmpty(),
+            includeMonthly = settings.showMonthlyUsage,
+        )
         val isDark = WidgetPalette.isDarkStatic(context, settings.themeMode)
 
         provideContent {
@@ -123,18 +128,50 @@ private fun StatusStripContent(
                     )
                     Spacer(GlanceModifier.width(6.dp))
                     Column {
-                        entry.lines.forEachIndexed { lineIndex, line ->
+                        val sizes = statusStripTextSizesSp(
+                            hasWeekly = entry.weekly != null,
+                            hasMonthly = entry.monthly != null,
+                        )
+                        Text(
+                            text = UsageDisplayFormatter.formatPercentShort(
+                                entry.primary.used,
+                                entry.primary.limit,
+                                settings.displayMode,
+                            ),
+                            style = TextStyle(
+                                color = ColorProvider(
+                                    Color(usageStatusTextColor(entry.primary.usedFraction, baseTextColor, backgroundArgb)),
+                                ),
+                                fontSize = sizes.primarySp.sp,
+                                fontWeight = FontWeight.Bold,
+                            ),
+                            maxLines = 1,
+                        )
+                        entry.weekly?.let { weekly ->
                             Text(
                                 text = UsageDisplayFormatter.formatPercentShort(
-                                    line.used,
-                                    line.limit,
+                                    weekly.used,
+                                    weekly.limit,
                                     settings.displayMode,
                                 ),
                                 style = TextStyle(
                                     color = ColorProvider(
-                                        Color(usageStatusTextColor(line.usedFraction, baseTextColor, backgroundArgb)),
+                                        Color(usageStatusTextColor(weekly.usedFraction, baseTextColor, backgroundArgb)),
                                     ),
-                                    fontSize = if (lineIndex == 0) 14.sp else 12.sp,
+                                    fontSize = sizes.weeklySp.sp,
+                                    fontWeight = FontWeight.Bold,
+                                ),
+                                maxLines = 1,
+                            )
+                        }
+                        entry.monthly?.let { monthly ->
+                            Text(
+                                text = formatMonthlyStatusText(monthly, settings.displayMode),
+                                style = TextStyle(
+                                    color = ColorProvider(
+                                        Color(usageStatusTextColor(monthly.usedFraction, baseTextColor, backgroundArgb)),
+                                    ),
+                                    fontSize = sizes.monthlySp.sp,
                                     fontWeight = FontWeight.Bold,
                                 ),
                                 maxLines = 1,

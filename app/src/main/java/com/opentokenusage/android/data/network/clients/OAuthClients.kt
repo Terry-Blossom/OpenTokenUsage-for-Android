@@ -75,6 +75,7 @@ class KimiClient(
             val periodMs = parseKimiPeriodMs(win)
             val label = when {
                 periodMs != null && periodMs <= 6L * 3600_000L -> "5時間枠"
+                periodMs != null && periodMs in (28L * 24L * 3600_000L - 12L * 3600_000L)..(31L * 24L * 3600_000L + 12L * 3600_000L) -> "Monthly"
                 periodMs != null && periodMs >= 6L * 24L * 3600_000L -> "Weekly"
                 else -> "利用枠 ${idx + 1}"
             }
@@ -102,7 +103,11 @@ class KimiClient(
             resetsAtMs = ProviderHttpSupport.parseDateMs(row["resetTime"] ?: row["reset_time"]),
             periodDurationMs = periodMs,
             primaryOrder = order,
-            period = if (periodMs != null && kotlin.math.abs(periodMs - 7L * 24L * 3600_000L) < 24L * 3600_000L) "weekly" else null,
+            period = when {
+                periodMs != null && kotlin.math.abs(periodMs - 7L * 24L * 3600_000L) < 24L * 3600_000L -> "weekly"
+                periodMs != null && periodMs in (28L * 24L * 3600_000L - 12L * 3600_000L)..(31L * 24L * 3600_000L + 12L * 3600_000L) -> "monthly"
+                else -> null
+            },
         )
     }
 

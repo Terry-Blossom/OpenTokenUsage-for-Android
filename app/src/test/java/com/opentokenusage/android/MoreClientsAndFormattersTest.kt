@@ -4,6 +4,7 @@ import com.opentokenusage.android.data.network.clients.AmpClient
 import com.opentokenusage.android.data.network.clients.AntigravityClient
 import com.opentokenusage.android.data.network.clients.DeepSeekClient
 import com.opentokenusage.android.data.network.clients.GrokClient
+import com.opentokenusage.android.data.network.clients.KimiClient
 import com.opentokenusage.android.data.network.clients.MiniMaxClient
 import com.opentokenusage.android.data.network.clients.OpenCodeGoClient
 import com.opentokenusage.android.data.network.clients.ProviderEndpointOverrides
@@ -115,6 +116,7 @@ class MoreClientsAndFormattersTest {
         assertEquals(14.0, (oc.lines[0] as MetricLine.Progress).used, 0.01)
         assertEquals(listOf("Session", "Weekly", "Monthly"), oc.lines.map { it.label })
         assertEquals("detail", oc.lines[2].scope)
+        assertEquals("monthly", (oc.lines[2] as MetricLine.Progress).period)
 
         // Amp
         server.enqueue(
@@ -125,6 +127,28 @@ class MoreClientsAndFormattersTest {
         val amp = AmpClient(http, ProviderEndpointOverrides(mapOf("amp" to baseUrl)))
             .probe(ConfiguredAccount("a1", ProviderId.AMP.id), AccountSecret(apiKey = "amp"))
         assertEquals(2.0, (amp.lines[0] as MetricLine.Progress).used, 0.01)
+    }
+
+    @Test
+    fun kimiParsesMonthlyUsagePeriod() = runTest {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """
+                {
+                  "limits": [
+                    {"window": {"duration": 5, "timeUnit": "HOUR"}, "detail": {"limit": 100, "used": 20}},
+                    {"window": {"duration": 7, "timeUnit": "DAY"}, "detail": {"limit": 100, "used": 45}}
+                  ],
+                  "usage": {"limit": 1000, "used": 320}
+                }
+                """.trimIndent(),
+            ),
+        )
+        val res = KimiClient(http, ProviderEndpointOverrides(mapOf("kimi" to baseUrl)))
+            .probe(ConfiguredAccount("k1", ProviderId.KIMI.id), AccountSecret(accessToken = "kimi-tok"))
+        assertEquals(listOf("5時間枠", "Weekly", "月間合計"), res.lines.map { it.label })
+        assertEquals("weekly", (res.lines[1] as MetricLine.Progress).period)
+        assertEquals("monthly", (res.lines[2] as MetricLine.Progress).period)
     }
 
     @Test

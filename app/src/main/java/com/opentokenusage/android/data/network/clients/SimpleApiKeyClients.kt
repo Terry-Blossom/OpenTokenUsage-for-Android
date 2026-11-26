@@ -75,7 +75,11 @@ class OpenRouterClient(
                 resetsAtMs = resetsAtMs,
                 periodDurationMs = periodMs,
                 primaryOrder = 1,
-                period = if (limitReset == "weekly") "weekly" else null,
+                period = when (limitReset) {
+                    "weekly" -> "weekly"
+                    "monthly" -> "monthly"
+                    else -> null
+                },
             )
         }
 
@@ -463,7 +467,7 @@ class OpenCodeGoClient(
             periodMs: Long,
             order: Int?,
             scope: String = "overview",
-            isWeekly: Boolean = false,
+            period: String? = null,
         ) {
             val w = usage.objOrNull(keyName) ?: return
             val pct = w.doubleOrNull("percent") ?: return
@@ -475,14 +479,14 @@ class OpenCodeGoClient(
                 resetsAtMs = ProviderHttpSupport.parseDateMs(w["resetsAt"]),
                 periodDurationMs = periodMs,
                 primaryOrder = order,
-                period = if (isWeekly) "weekly" else null,
+                period = period,
                 scope = scope,
             )
         }
 
         addWindow("rolling", "Session", 5L * 3600_000L, 1)
-        addWindow("weekly", "Weekly", 7L * 24L * 3600_000L, 2, isWeekly = true)
-        addWindow("monthly", "Monthly", 30L * 24L * 3600_000L, null, scope = "detail")
+        addWindow("weekly", "Weekly", 7L * 24L * 3600_000L, 2, period = "weekly")
+        addWindow("monthly", "Monthly", 30L * 24L * 3600_000L, null, scope = "detail", period = "monthly")
 
         if (lines.isEmpty()) throw ProviderProbeException("OpenCode Go の利用枠が見つかりません")
         return ProbeResult(plan = "Go", lines = lines)

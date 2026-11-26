@@ -2,18 +2,47 @@ package com.opentokenusage.android.util
 
 import android.graphics.Color
 import androidx.core.graphics.ColorUtils
+import com.opentokenusage.android.domain.logic.UsageDisplayFormatter
 import com.opentokenusage.android.domain.model.MetricLine
 import com.opentokenusage.android.domain.model.ProviderId
 import com.opentokenusage.android.domain.model.ProviderSnapshot
+import com.opentokenusage.android.domain.model.UsageDisplayMode
+import java.util.Locale
 import kotlin.math.abs
+
+/** Selected progress lines for one provider cell in the status strip. */
+internal data class StatusStripLines(
+    val primary: MetricLine.Progress,
+    val weekly: MetricLine.Progress? = null,
+    val monthly: MetricLine.Progress? = null,
+) {
+    fun toList(): List<MetricLine.Progress> = listOfNotNull(primary, weekly, monthly)
+}
 
 /** One provider cell in the status strip shared by the notification and the 1x3 widget. */
 internal data class UsageStatusEntry(
     val snapshot: ProviderSnapshot,
-    val lines: List<MetricLine.Progress>,
+    val primary: MetricLine.Progress,
+    val weekly: MetricLine.Progress? = null,
+    val monthly: MetricLine.Progress? = null,
+) {
+    val lines: List<MetricLine.Progress>
+        get() = listOfNotNull(primary, weekly, monthly)
+}
+
+internal data class StatusStripTextSizesSp(
+    val primarySp: Float,
+    val weeklySp: Float,
+    val monthlySp: Float,
 )
 
 internal const val MAX_USAGE_STATUS_PROVIDERS = 3
+
+private const val HOUR_MS = 3600_000L
+private const val DAY_MS = 24L * HOUR_MS
+private const val WEEK_MS = 7L * DAY_MS
+private const val MONTHLY_MIN_MS = 28L * DAY_MS - 12L * HOUR_MS
+private const val MONTHLY_MAX_MS = 31L * DAY_MS + 12L * HOUR_MS
 
 /** Provider logos drawn with white glyphs need a tint that follows the strip background. */
 private val MONOCHROME_GLYPH_PROVIDERS = setOf("grok", "opencode-go")
@@ -22,11 +51,19 @@ private val MONOCHROME_GLYPH_PROVIDERS = setOf("grok", "opencode-go")
  * Picks the same providers, in the same order, for both the persistent notification
  * and the home-screen status strip: one cell per provider, capped at three.
  */
-internal fun usageStatusEntries(snapshots: List<ProviderSnapshot>): List<UsageStatusEntry> =
+internal fun usageStatusEntries(
+    snapshots: List<ProviderSnapshot>,
+    includeMonthly: Boolean = false,
+): List<UsageStatusEntry> =
     snapshots.mapNotNull { snapshot ->
-        statusNotificationLines(snapshot)
-            .takeIf { it.isNotEmpty() }
-            ?.let { UsageStatusEntry(snapshot, it) }
+        selectStatusStripLines(snapshot, includeMonthly)?.let { selected ->
+            UsageStatusEntry(
+                snapshot = snapshot,
+                primary = selected.primary,
+                weekly = selected.weekly,
+                monthly = selected.monthly,
+            )
+        }
     }
         .distinctBy { it.snapshot.providerId }
         .take(MAX_USAGE_STATUS_PROVIDERS)
@@ -76,12 +113,78 @@ private fun readableStatusColor(color: Int, background: Int): Int {
     return target
 }
 
-internal fun statusNotificationLines(snapshot: ProviderSnapshot): List<MetricLine.Progress> {
-    val lines = snapshot.overviewLines().filterIsInstance<MetricLine.Progress>()
-    val primary = lines.minByOrNull { it.primaryOrder ?: Int.MAX_VALUE } ?: return emptyList()
-    val weekly = lines.firstOrNull { line ->
-        line != primary && (line.period.equals("weekly", ignoreCase = true) ||
-            (line.periodDurationMs != null && abs(line.periodDurationMs - 7L * 24L * 3600_000L) < 24L * 3600_000L))
+internal fun isWeeklyStatusLine(line: MetricLine.Progress): Boolean =
+    line.period.equals("weekly", ignoreCase = true) ||
+        (line.periodDurationMs != null && abs(line.periodDurationMs - WEEK_MS) < DAY_MS)
+
+internal fun isMonthlyStatusLine(line: MetricLine.Progress): Boolean {
+    if (isWeeklyStatusLine(line)) return false
+    if (line.period.equals("monthly", ignoreCase = true) || line.period.equals("month", ignoreCase = true)) {
+        return true
     }
-    return listOfNotNull(primary, weekly)
+    val periodMs = line.periodDurationMs
+    if (periodMs != null && periodMs in MONTHLY_MIN_MS..MONTHLY_MAX_MS) {
+        return true
+    }
+    val lowerLabel = line.label.lowercase(Locale.ROOT)
+    return "month" in lowerLabel || "月間" in line.label || "月次" in line.label
+}
+
+internal fun selectStatusStripLines(
+    snapshot: ProviderSnapshot,
+    includeMonthly: Boolean = false,
+): StatusStripLines? {
+    val overviewProgress = snapshot.overviewLines().filterIsInstance<MetricLine.Progress>()
+    val primary = overviewProgress.minByOrNull { it.primaryOrder ?: Int.MAX_VALUE } ?: return null
+    val weekly = overviewProgress.firstOrNull { line ->
+        line != primary && isWeeklyStatusLine(line)
+    }
+    val monthly = if (includeMonthly && !isMonthlyStatusLine(primary)) {
+        val candidates = overviewProgress + snapshot.lines
+            .filter { it.scope == "detail" }
+            .filterIsInstance<MetricLine.Progress>()
+        candidates.firstOrNull { line ->
+            line != primary && line != weekly && isMonthlyStatusLine(line)
+        }
+    } else {
+        null
+    }
+    return StatusStripLines(primary = primary, weekly = weekly, monthly = monthly)
+}
+
+internal fun statusNotificationLines(
+    snapshot: ProviderSnapshot,
+    includeMonthly: Boolean = false,
+): List<MetricLine.Progress> =
+    selectStatusStripLines(snapshot, includeMonthly)?.toList().orEmpty()
+
+internal fun formatMonthlyStatusText(
+    line: MetricLine.Progress,
+    displayMode: UsageDisplayMode,
+): String = "月 ${UsageDisplayFormatter.formatPercentShort(line.used, line.limit, displayMode)}"
+
+internal fun formatStatusPreviewText(
+    entries: List<UsageStatusEntry>,
+    displayMode: UsageDisplayMode,
+): String = entries.joinToString(" · ") { entry ->
+    val parts = buildList {
+        add(UsageDisplayFormatter.formatPercentShort(entry.primary.used, entry.primary.limit, displayMode))
+        entry.weekly?.let { add(UsageDisplayFormatter.formatPercentShort(it.used, it.limit, displayMode)) }
+        entry.monthly?.let { add(formatMonthlyStatusText(it, displayMode)) }
+    }
+    "${entry.snapshot.displayName} ${parts.joinToString(" / ")}"
+}
+
+/**
+ * Keeps exact legacy 14sp / 12sp typography whenever the monthly line is absent,
+ * and compacts slightly when three lines stack so the 48dp notification strip and
+ * 1x3 home-screen widget never clip vertically.
+ */
+internal fun statusStripTextSizesSp(
+    hasWeekly: Boolean,
+    hasMonthly: Boolean,
+): StatusStripTextSizesSp = when {
+    !hasMonthly -> StatusStripTextSizesSp(primarySp = 14f, weeklySp = 12f, monthlySp = 10f)
+    hasWeekly -> StatusStripTextSizesSp(primarySp = 13f, weeklySp = 11f, monthlySp = 9f)
+    else -> StatusStripTextSizesSp(primarySp = 14f, weeklySp = 12f, monthlySp = 10f)
 }
