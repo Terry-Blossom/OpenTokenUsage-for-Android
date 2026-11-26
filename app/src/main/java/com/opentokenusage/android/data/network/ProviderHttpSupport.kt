@@ -1,5 +1,6 @@
 package com.opentokenusage.android.data.network
 
+import com.opentokenusage.android.domain.model.AccountSecret
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -29,7 +30,21 @@ class ProviderProbeException(
     val isAuthError: Boolean = false,
     val retryAfterMs: Long? = null,
     val statusCode: Int? = null,
-) : RuntimeException(message)
+    val updatedSecret: AccountSecret? = null,
+) : RuntimeException(message) {
+    fun withUpdatedSecret(secret: AccountSecret?): ProviderProbeException =
+        if (secret == null || this.updatedSecret != null) {
+            this
+        } else {
+            ProviderProbeException(
+                message = message,
+                isAuthError = isAuthError,
+                retryAfterMs = retryAfterMs,
+                statusCode = statusCode,
+                updatedSecret = secret,
+            )
+        }
+}
 
 data class HttpResponseData(
     val statusCode: Int,

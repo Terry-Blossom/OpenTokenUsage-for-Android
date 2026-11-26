@@ -459,9 +459,11 @@ class UsageRepository(
                 val statusDeferred = async { refreshProviderStatus(account.providerId) }
                 try {
                     val previousSnapshot = _snapshots.value[accountId]
-                    val res = clientRegistry.clientFor(account.providerId).probe(account, secret, now)
+                    val res = executeProbeWithSecretPersistence(
+                        probe = { clientRegistry.clientFor(account.providerId).probe(account, secret, now) },
+                        persistSecret = { secretsStore.saveSecret(accountId, it) },
+                    )
                     val serviceStatus = statusDeferred.await()
-                    res.updatedSecret?.let { secretsStore.saveSecret(accountId, it) }
                     gateStore.recordSuccess(accountId, now)
                     val updatedSnapshot = applyProbeResult(account, res, now, serviceStatus)
                     val usageChanged = SmartRefreshPolicy.hasProgressUsageChanged(previousSnapshot, updatedSnapshot)
@@ -686,4 +688,16 @@ class UsageRepository(
     private companion object {
         val LEGACY_DESKTOP_PROVIDER_IDS = setOf("desktop-sync", "jetbrains-ai-assistant")
     }
+}
+
+internal suspend fun executeProbeWithSecretPersistence(
+    probe: suspend () -> com.opentokenusage.android.data.network.clients.ProbeResult,
+    persistSecret: suspend (AccountSecret) -> Unit,
+): com.opentokenusage.android.data.network.clients.ProbeResult = try {
+    val result = probe()
+    result.updatedSecret?.let { persistSecret(it) }
+    result
+} catch (e: ProviderProbeException) {
+    e.updatedSecret?.let { persistSecret(it) }
+    throw e
 }

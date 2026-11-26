@@ -48,142 +48,146 @@ class ClaudeClient(
             accessToken = currentSecret.accessToken
         }
 
-        val apiBase = overrides.resolve("claude", "https://api.anthropic.com")
-        var resp = callUsage(apiBase, accessToken)
-        if ((resp.statusCode == 401 || resp.statusCode == 403) && currentSecret.refreshToken.isNotBlank() && updatedSecret == null) {
-            currentSecret = performRefresh(currentSecret)
-            updatedSecret = currentSecret
-            accessToken = currentSecret.accessToken
-            resp = callUsage(apiBase, accessToken)
-        }
+        return try {
+            val apiBase = overrides.resolve("claude", "https://api.anthropic.com")
+            var resp = callUsage(apiBase, accessToken)
+            if ((resp.statusCode == 401 || resp.statusCode == 403) && currentSecret.refreshToken.isNotBlank() && updatedSecret == null) {
+                currentSecret = performRefresh(currentSecret)
+                updatedSecret = currentSecret
+                accessToken = currentSecret.accessToken
+                resp = callUsage(apiBase, accessToken)
+            }
 
-        if (resp.statusCode == 429) {
-            throw ProviderProbeException(
-                message = "Claude がレート制限中です (HTTP 429)。時間を置いて再試行してください。",
-                isAuthError = false,
-                retryAfterMs = ProviderHttpSupport.parseRetryAfterMs(resp.firstHeader("Retry-After"), 15 * 60_000L),
-                statusCode = 429,
-            )
-        }
-        if (resp.statusCode == 401 || resp.statusCode == 403) {
-            throw ProviderProbeException("Claude のセッションが期限切れです。認証JSONを再貼付してください。", isAuthError = true, statusCode = resp.statusCode)
-        }
-        if (resp.statusCode !in 200..299) {
-            throw ProviderProbeException("Claude の取得に失敗 (HTTP ${resp.statusCode})", statusCode = resp.statusCode)
-        }
-
-        val data = ProviderHttpSupport.tryParseObject(resp.bodyText)
-            ?: throw ProviderProbeException("Claude のレスポンス解析に失敗")
-
-        val profilePlan = runCatching { fetchPlan(apiBase, accessToken) }.getOrNull()
-        val lines = mutableListOf<MetricLine>()
-
-        data.objOrNull("five_hour")?.let { five ->
-            val util = five.doubleOrNull("utilization")
-            if (util != null) {
-                val resetsMs = ProviderHttpSupport.parseDateMs(five["resets_at"])
-                val effectiveUsed = if (resetsMs != null && resetsMs <= nowMs) 0.0 else util.coerceIn(0.0, 100.0)
-                lines += MetricLine.Progress(
-                    label = "Session (5h)",
-                    used = effectiveUsed,
-                    limit = 100.0,
-                    format = MetricFormat.Percent,
-                    resetsAtMs = if (resetsMs != null && resetsMs > nowMs) resetsMs else null,
-                    periodDurationMs = 5L * 3600_000L,
-                    primaryOrder = 1,
+            if (resp.statusCode == 429) {
+                throw ProviderProbeException(
+                    message = "Claude がレート制限中です (HTTP 429)。時間を置いて再試行してください。",
+                    isAuthError = false,
+                    retryAfterMs = ProviderHttpSupport.parseRetryAfterMs(resp.firstHeader("Retry-After"), 15 * 60_000L),
+                    statusCode = 429,
                 )
             }
-        }
-
-        data.objOrNull("seven_day")?.let { seven ->
-            val util = seven.doubleOrNull("utilization")
-            if (util != null) {
-                val resetsMs = ProviderHttpSupport.parseDateMs(seven["resets_at"])
-                val effectiveUsed = if (resetsMs != null && resetsMs <= nowMs) 0.0 else util.coerceIn(0.0, 100.0)
-                lines += MetricLine.Progress(
-                    label = "Weekly (7d)",
-                    used = effectiveUsed,
-                    limit = 100.0,
-                    format = MetricFormat.Percent,
-                    resetsAtMs = if (resetsMs != null && resetsMs > nowMs) resetsMs else null,
-                    periodDurationMs = 7L * 24L * 3600_000L,
-                    primaryOrder = 2,
-                    period = "weekly",
-                )
+            if (resp.statusCode == 401 || resp.statusCode == 403) {
+                throw ProviderProbeException("Claude のセッションが期限切れです。認証JSONを再貼付してください。", isAuthError = true, statusCode = resp.statusCode)
             }
-        }
-
-        val limitsArr = data.arrOrNull("limits")
-        if (limitsArr != null) {
-            for (el in limitsArr) {
-                val entry = el as? JsonObject ?: continue
-                val name = entry.strOrNull("model_name") ?: entry.strOrNull("name") ?: continue
-                val pct = entry.doubleOrNull("percent") ?: entry.doubleOrNull("utilization") ?: continue
-                val resetsMs = ProviderHttpSupport.parseDateMs(entry["resets_at"])
-                val effectivePct = if (resetsMs != null && resetsMs <= nowMs) 0.0 else pct.coerceIn(0.0, 100.0)
-                lines += MetricLine.Progress(
-                    label = "$name (7d)",
-                    used = effectivePct,
-                    limit = 100.0,
-                    format = MetricFormat.Percent,
-                    resetsAtMs = if (resetsMs != null && resetsMs > nowMs) resetsMs else null,
-                    periodDurationMs = 7L * 24L * 3600_000L,
-                    period = "weekly",
-                    scope = "overview",
-                )
+            if (resp.statusCode !in 200..299) {
+                throw ProviderProbeException("Claude の取得に失敗 (HTTP ${resp.statusCode})", statusCode = resp.statusCode)
             }
-        } else {
-            data.objOrNull("seven_day_sonnet")?.doubleOrNull("utilization")?.let { util ->
-                val resetsMs = ProviderHttpSupport.parseDateMs(data.objOrNull("seven_day_sonnet")?.get("resets_at"))
-                lines += MetricLine.Progress(
-                    label = "Sonnet (7d)",
-                    used = if (resetsMs != null && resetsMs <= nowMs) 0.0 else util.coerceIn(0.0, 100.0),
-                    limit = 100.0,
-                    format = MetricFormat.Percent,
-                    resetsAtMs = if (resetsMs != null && resetsMs > nowMs) resetsMs else null,
-                    periodDurationMs = 7L * 24L * 3600_000L,
-                    period = "weekly",
-                )
-            }
-        }
 
-        data.objOrNull("extra_usage")?.let { extra ->
-            if (extra.boolOrNull("is_enabled") == true) {
-                val usedCents = extra.doubleOrNull("used_credits") ?: 0.0
-                val limitCents = extra.doubleOrNull("monthly_limit") ?: 0.0
-                if (limitCents > 0.0) {
+            val data = ProviderHttpSupport.tryParseObject(resp.bodyText)
+                ?: throw ProviderProbeException("Claude のレスポンス解析に失敗")
+
+            val profilePlan = runCatching { fetchPlan(apiBase, accessToken) }.getOrNull()
+            val lines = mutableListOf<MetricLine>()
+
+            data.objOrNull("five_hour")?.let { five ->
+                val util = five.doubleOrNull("utilization")
+                if (util != null) {
+                    val resetsMs = ProviderHttpSupport.parseDateMs(five["resets_at"])
+                    val effectiveUsed = if (resetsMs != null && resetsMs <= nowMs) 0.0 else util.coerceIn(0.0, 100.0)
                     lines += MetricLine.Progress(
-                        label = "Extra usage",
-                        used = max(0.0, usedCents / 100.0),
-                        limit = limitCents / 100.0,
-                        format = MetricFormat.Dollars,
-                        scope = "detail",
+                        label = "Session (5h)",
+                        used = effectiveUsed,
+                        limit = 100.0,
+                        format = MetricFormat.Percent,
+                        resetsAtMs = if (resetsMs != null && resetsMs > nowMs) resetsMs else null,
+                        periodDurationMs = 5L * 3600_000L,
+                        primaryOrder = 1,
                     )
                 }
             }
-        }
 
-        val atLimit = lines.filterIsInstance<MetricLine.Progress>().any { it.usedFraction >= 1.0 }
-        val resetItems = resolveResetGrants(
-            accountId = account.id,
-            apiBase = apiBase,
-            accessToken = accessToken,
-            inlineCedarEmber = data.objOrNull("cedar_ember"),
-            atLimit = atLimit,
-            nowMs = nowMs,
-        )
-        if (resetItems.isNotEmpty()) {
-            lines += MetricLine.ResetCredit(
-                label = "リセットクレジット",
-                availableCount = resetItems.sumOf { it.count },
-                items = resetItems,
-                expiresAtMs = resetItems.mapNotNull { it.expiresAtMs }.minOrNull(),
-                scope = "detail",
+            data.objOrNull("seven_day")?.let { seven ->
+                val util = seven.doubleOrNull("utilization")
+                if (util != null) {
+                    val resetsMs = ProviderHttpSupport.parseDateMs(seven["resets_at"])
+                    val effectiveUsed = if (resetsMs != null && resetsMs <= nowMs) 0.0 else util.coerceIn(0.0, 100.0)
+                    lines += MetricLine.Progress(
+                        label = "Weekly (7d)",
+                        used = effectiveUsed,
+                        limit = 100.0,
+                        format = MetricFormat.Percent,
+                        resetsAtMs = if (resetsMs != null && resetsMs > nowMs) resetsMs else null,
+                        periodDurationMs = 7L * 24L * 3600_000L,
+                        primaryOrder = 2,
+                        period = "weekly",
+                    )
+                }
+            }
+
+            val limitsArr = data.arrOrNull("limits")
+            if (limitsArr != null) {
+                for (el in limitsArr) {
+                    val entry = el as? JsonObject ?: continue
+                    val name = entry.strOrNull("model_name") ?: entry.strOrNull("name") ?: continue
+                    val pct = entry.doubleOrNull("percent") ?: entry.doubleOrNull("utilization") ?: continue
+                    val resetsMs = ProviderHttpSupport.parseDateMs(entry["resets_at"])
+                    val effectivePct = if (resetsMs != null && resetsMs <= nowMs) 0.0 else pct.coerceIn(0.0, 100.0)
+                    lines += MetricLine.Progress(
+                        label = "$name (7d)",
+                        used = effectivePct,
+                        limit = 100.0,
+                        format = MetricFormat.Percent,
+                        resetsAtMs = if (resetsMs != null && resetsMs > nowMs) resetsMs else null,
+                        periodDurationMs = 7L * 24L * 3600_000L,
+                        period = "weekly",
+                        scope = "overview",
+                    )
+                }
+            } else {
+                data.objOrNull("seven_day_sonnet")?.doubleOrNull("utilization")?.let { util ->
+                    val resetsMs = ProviderHttpSupport.parseDateMs(data.objOrNull("seven_day_sonnet")?.get("resets_at"))
+                    lines += MetricLine.Progress(
+                        label = "Sonnet (7d)",
+                        used = if (resetsMs != null && resetsMs <= nowMs) 0.0 else util.coerceIn(0.0, 100.0),
+                        limit = 100.0,
+                        format = MetricFormat.Percent,
+                        resetsAtMs = if (resetsMs != null && resetsMs > nowMs) resetsMs else null,
+                        periodDurationMs = 7L * 24L * 3600_000L,
+                        period = "weekly",
+                    )
+                }
+            }
+
+            data.objOrNull("extra_usage")?.let { extra ->
+                if (extra.boolOrNull("is_enabled") == true) {
+                    val usedCents = extra.doubleOrNull("used_credits") ?: 0.0
+                    val limitCents = extra.doubleOrNull("monthly_limit") ?: 0.0
+                    if (limitCents > 0.0) {
+                        lines += MetricLine.Progress(
+                            label = "Extra usage",
+                            used = max(0.0, usedCents / 100.0),
+                            limit = limitCents / 100.0,
+                            format = MetricFormat.Dollars,
+                            scope = "detail",
+                        )
+                    }
+                }
+            }
+
+            val atLimit = lines.filterIsInstance<MetricLine.Progress>().any { it.usedFraction >= 1.0 }
+            val resetItems = resolveResetGrants(
+                accountId = account.id,
+                apiBase = apiBase,
+                accessToken = accessToken,
+                inlineCedarEmber = data.objOrNull("cedar_ember"),
+                atLimit = atLimit,
+                nowMs = nowMs,
             )
-        }
+            if (resetItems.isNotEmpty()) {
+                lines += MetricLine.ResetCredit(
+                    label = "リセットクレジット",
+                    availableCount = resetItems.sumOf { it.count },
+                    items = resetItems,
+                    expiresAtMs = resetItems.mapNotNull { it.expiresAtMs }.minOrNull(),
+                    scope = "detail",
+                )
+            }
 
-        if (lines.isEmpty()) throw ProviderProbeException("Claude の利用枠データが見つかりません")
-        return ProbeResult(plan = profilePlan, lines = lines, updatedSecret = updatedSecret)
+            if (lines.isEmpty()) throw ProviderProbeException("Claude の利用枠データが見つかりません")
+            ProbeResult(plan = profilePlan, lines = lines, updatedSecret = updatedSecret)
+        } catch (e: ProviderProbeException) {
+            throw e.withUpdatedSecret(updatedSecret)
+        }
     }
 
     private suspend fun resolveResetGrants(
@@ -378,100 +382,104 @@ class CodexClient(
             accessToken = currentSecret.accessToken
         }
 
-        val base = overrides.resolve("codex", "https://chatgpt.com")
-        var resp = callUsage(base, accessToken, currentSecret.accountId)
-        if ((resp.statusCode == 401 || resp.statusCode == 403) && currentSecret.refreshToken.isNotBlank() && updatedSecret == null) {
-            currentSecret = refreshCodex(currentSecret)
-            updatedSecret = currentSecret
-            accessToken = currentSecret.accessToken
-            resp = callUsage(base, accessToken, currentSecret.accountId)
-        }
+        return try {
+            val base = overrides.resolve("codex", "https://chatgpt.com")
+            var resp = callUsage(base, accessToken, currentSecret.accountId)
+            if ((resp.statusCode == 401 || resp.statusCode == 403) && currentSecret.refreshToken.isNotBlank() && updatedSecret == null) {
+                currentSecret = refreshCodex(currentSecret)
+                updatedSecret = currentSecret
+                accessToken = currentSecret.accessToken
+                resp = callUsage(base, accessToken, currentSecret.accountId)
+            }
 
-        if (resp.statusCode == 429) {
-            throw ProviderProbeException(
-                "Codex がレート制限中 (HTTP 429)",
-                retryAfterMs = ProviderHttpSupport.parseRetryAfterMs(resp.firstHeader("Retry-After")),
-                statusCode = 429,
-            )
-        }
-        if (resp.statusCode == 401 || resp.statusCode == 403) {
-            throw ProviderProbeException("Codex の認証が期限切れです。auth.json を再貼付してください。", isAuthError = true)
-        }
-        if (resp.statusCode !in 200..299) {
-            throw ProviderProbeException("Codex の取得に失敗 (HTTP ${resp.statusCode})", statusCode = resp.statusCode)
-        }
+            if (resp.statusCode == 429) {
+                throw ProviderProbeException(
+                    "Codex がレート制限中 (HTTP 429)",
+                    retryAfterMs = ProviderHttpSupport.parseRetryAfterMs(resp.firstHeader("Retry-After")),
+                    statusCode = 429,
+                )
+            }
+            if (resp.statusCode == 401 || resp.statusCode == 403) {
+                throw ProviderProbeException("Codex の認証が期限切れです。auth.json を再貼付してください。", isAuthError = true)
+            }
+            if (resp.statusCode !in 200..299) {
+                throw ProviderProbeException("Codex の取得に失敗 (HTTP ${resp.statusCode})", statusCode = resp.statusCode)
+            }
 
-        val data = ProviderHttpSupport.tryParseObject(resp.bodyText)
-            ?: throw ProviderProbeException("Codex のレスポンス解析に失敗")
+            val data = ProviderHttpSupport.tryParseObject(resp.bodyText)
+                ?: throw ProviderProbeException("Codex のレスポンス解析に失敗")
 
-        val lines = mutableListOf<MetricLine>()
-        val rateLimit = data.objOrNull("rate_limit")
-        val primary = rateLimit?.objOrNull("primary_window")
-        val secondary = rateLimit?.objOrNull("secondary_window")
+            val lines = mutableListOf<MetricLine>()
+            val rateLimit = data.objOrNull("rate_limit")
+            val primary = rateLimit?.objOrNull("primary_window")
+            val secondary = rateLimit?.objOrNull("secondary_window")
 
-        val primaryHeaderPct = resp.firstHeader("x-codex-primary-used-percent")?.toDoubleOrNull()
-        val secondaryHeaderPct = resp.firstHeader("x-codex-secondary-used-percent")?.toDoubleOrNull()
+            val primaryHeaderPct = resp.firstHeader("x-codex-primary-used-percent")?.toDoubleOrNull()
+            val secondaryHeaderPct = resp.firstHeader("x-codex-secondary-used-percent")?.toDoubleOrNull()
 
-        fun addWindowLine(window: JsonObject?, headerPct: Double?, label: String, defaultPeriodMs: Long, order: Int?, isWeekly: Boolean) {
-            val pct = headerPct ?: window?.doubleOrNull("used_percent") ?: return
-            val periodSec = window?.doubleOrNull("limit_window_seconds")?.toLong()
-            val periodMs = periodSec?.times(1000L) ?: defaultPeriodMs
-            val resetAt = window?.get("reset_at")?.let { ProviderHttpSupport.parseDateMs(it) }
-                ?: window?.doubleOrNull("reset_after_seconds")?.let { nowMs + (it * 1000.0).toLong() }
-            lines += MetricLine.Progress(
-                label = label,
-                used = pct.coerceIn(0.0, 100.0),
-                limit = 100.0,
-                format = MetricFormat.Percent,
-                resetsAtMs = resetAt,
-                periodDurationMs = periodMs,
-                primaryOrder = order,
-                period = if (isWeekly) "weekly" else null,
-            )
-        }
+            fun addWindowLine(window: JsonObject?, headerPct: Double?, label: String, defaultPeriodMs: Long, order: Int?, isWeekly: Boolean) {
+                val pct = headerPct ?: window?.doubleOrNull("used_percent") ?: return
+                val periodSec = window?.doubleOrNull("limit_window_seconds")?.toLong()
+                val periodMs = periodSec?.times(1000L) ?: defaultPeriodMs
+                val resetAt = window?.get("reset_at")?.let { ProviderHttpSupport.parseDateMs(it) }
+                    ?: window?.doubleOrNull("reset_after_seconds")?.let { nowMs + (it * 1000.0).toLong() }
+                lines += MetricLine.Progress(
+                    label = label,
+                    used = pct.coerceIn(0.0, 100.0),
+                    limit = 100.0,
+                    format = MetricFormat.Percent,
+                    resetsAtMs = resetAt,
+                    periodDurationMs = periodMs,
+                    primaryOrder = order,
+                    period = if (isWeekly) "weekly" else null,
+                )
+            }
 
-        addWindowLine(primary, primaryHeaderPct, "Session (5h)", 5L * 3600_000L, 1, isWeekly = false)
-        addWindowLine(secondary, secondaryHeaderPct, "Weekly (7d)", 7L * 24L * 3600_000L, 2, isWeekly = true)
+            addWindowLine(primary, primaryHeaderPct, "Session (5h)", 5L * 3600_000L, 1, isWeekly = false)
+            addWindowLine(secondary, secondaryHeaderPct, "Weekly (7d)", 7L * 24L * 3600_000L, 2, isWeekly = true)
 
-        if (rateLimit == null) {
-            pushSpendControlLine(lines, nowMs, data)
-        }
+            if (rateLimit == null) {
+                pushSpendControlLine(lines, nowMs, data)
+            }
 
-        data.objOrNull("code_review_rate_limit")?.objOrNull("primary_window")?.let { rev ->
-            addWindowLine(rev, null, "Code Review", 7L * 24L * 3600_000L, null, isWeekly = true)
-        }
+            data.objOrNull("code_review_rate_limit")?.objOrNull("primary_window")?.let { rev ->
+                addWindowLine(rev, null, "Code Review", 7L * 24L * 3600_000L, null, isWeekly = true)
+            }
 
-        data.arrOrNull("additional_rate_limits")?.forEach { item ->
-            val obj = item as? JsonObject ?: return@forEach
-            val name = obj.strOrNull("limit_name") ?: "追加枠"
-            val w = obj.objOrNull("rate_limit")?.objOrNull("primary_window")
-            addWindowLine(w, null, name, 5L * 3600_000L, null, isWeekly = false)
-        }
+            data.arrOrNull("additional_rate_limits")?.forEach { item ->
+                val obj = item as? JsonObject ?: return@forEach
+                val name = obj.strOrNull("limit_name") ?: "追加枠"
+                val w = obj.objOrNull("rate_limit")?.objOrNull("primary_window")
+                addWindowLine(w, null, name, 5L * 3600_000L, null, isWeekly = false)
+            }
 
-        data.objOrNull("credits")?.doubleOrNull("balance")?.let { bal ->
-            val usd = bal * 0.04
-            lines += MetricLine.Text("クレジット残高", String.format(java.util.Locale.US, "$%.2f", usd), scope = "detail")
-        }
+            data.objOrNull("credits")?.doubleOrNull("balance")?.let { bal ->
+                val usd = bal * 0.04
+                lines += MetricLine.Text("クレジット残高", String.format(java.util.Locale.US, "$%.2f", usd), scope = "detail")
+            }
 
-        data.objOrNull("rate_limit_reset_credits")?.doubleOrNull("available_count")?.let { cnt ->
-            val summaryCount = cnt.toInt()
-            if (summaryCount > 0) {
-                val resetItems = fetchCodexResetCredits(base, accessToken, currentSecret.accountId, summaryCount, nowMs)
-                val activeCount = resetItems.sumOf { it.count }
-                if (activeCount > 0) {
-                    lines += MetricLine.ResetCredit(
-                        label = "リセットクレジット",
-                        availableCount = activeCount,
-                        items = resetItems,
-                        expiresAtMs = resetItems.mapNotNull { it.expiresAtMs }.minOrNull(),
-                        scope = "detail",
-                    )
+            data.objOrNull("rate_limit_reset_credits")?.doubleOrNull("available_count")?.let { cnt ->
+                val summaryCount = cnt.toInt()
+                if (summaryCount > 0) {
+                    val resetItems = fetchCodexResetCredits(base, accessToken, currentSecret.accountId, summaryCount, nowMs)
+                    val activeCount = resetItems.sumOf { it.count }
+                    if (activeCount > 0) {
+                        lines += MetricLine.ResetCredit(
+                            label = "リセットクレジット",
+                            availableCount = activeCount,
+                            items = resetItems,
+                            expiresAtMs = resetItems.mapNotNull { it.expiresAtMs }.minOrNull(),
+                            scope = "detail",
+                        )
+                    }
                 }
             }
-        }
 
-        if (lines.isEmpty()) throw ProviderProbeException("Codex の利用状況データが見つかりません")
-        return ProbeResult(plan = data.strOrNull("plan_type"), lines = lines, updatedSecret = updatedSecret)
+            if (lines.isEmpty()) throw ProviderProbeException("Codex の利用状況データが見つかりません")
+            ProbeResult(plan = data.strOrNull("plan_type"), lines = lines, updatedSecret = updatedSecret)
+        } catch (e: ProviderProbeException) {
+            throw e.withUpdatedSecret(updatedSecret)
+        }
     }
 
     private fun pushSpendControlLine(lines: MutableList<MetricLine>, nowMs: Long, data: JsonObject) {
