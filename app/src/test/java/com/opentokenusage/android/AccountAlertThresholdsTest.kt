@@ -137,4 +137,45 @@ class AccountAlertThresholdsTest {
         val clearedEmpty = partial.withAccountAlertThresholds("acc1", AccountAlertThresholds(null, null))
         assertTrue(clearedEmpty.accountAlertThresholds.isEmpty())
     }
+
+    @Test
+    fun crossingHighThresholdMarksLowThresholdNotifiedToPreventDelayedFiring() {
+        val settings = AppSettings(
+            alertThreshold1 = 75,
+            alertThreshold2 = 90,
+            notifyThresholdAlerts = true,
+        )
+        // Jumps straight to 92% -> fires only high alert (90%) and marks both t2 and t1.
+        val first = evaluateAlertNotifications(
+            previous = null,
+            current = snapshot("acc1", "Claude", 92.0),
+            settings = settings,
+            dedupeMap = emptyMap(),
+            nowMs = 1_780_000_000_000L,
+        )
+        assertEquals(1, first.notifications.size)
+        assertTrue(first.notifications.single().body.contains("上限警告 90%"))
+        assertTrue(first.updatedDedupeMap.keys.any { it.startsWith("t2:") })
+        assertTrue(first.updatedDedupeMap.keys.any { it.startsWith("t1:") })
+
+        // Subsequent refresh still at 92% must NOT fire delayed low alert (75%).
+        val second = evaluateAlertNotifications(
+            previous = null,
+            current = snapshot("acc1", "Claude", 92.0),
+            settings = settings,
+            dedupeMap = first.updatedDedupeMap,
+            nowMs = 1_780_000_060_000L,
+        )
+        assertTrue(second.notifications.isEmpty())
+
+        // Even if usage dips slightly to 85% within the same window, low alert stays suppressed.
+        val third = evaluateAlertNotifications(
+            previous = null,
+            current = snapshot("acc1", "Claude", 85.0),
+            settings = settings,
+            dedupeMap = second.updatedDedupeMap,
+            nowMs = 1_780_000_120_000L,
+        )
+        assertTrue(third.notifications.isEmpty())
+    }
 }

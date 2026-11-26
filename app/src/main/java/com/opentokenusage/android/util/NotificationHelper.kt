@@ -64,13 +64,18 @@ internal fun evaluateAlertNotifications(
             val (t1, t2) = settings.effectiveAlertThresholds(current.accountId)
             val high = maxOf(t1, t2)
             val low = minOf(t1, t2)
-            if (pct >= high && !mutable.containsKey("t2:$windowKey")) {
-                mutable["t2:$windowKey"] = nowMs
-                notifications += AlertNotification(
-                    id = "t2:$windowKey".hashCode(),
-                    title = "${current.displayName} (${line.label})",
-                    body = "使用率が ${pct}% に到達しました（上限警告 ${high}%）",
-                )
+            if (pct >= high) {
+                if (!mutable.containsKey("t2:$windowKey")) {
+                    mutable["t2:$windowKey"] = nowMs
+                    mutable.putIfAbsent("t1:$windowKey", nowMs)
+                    notifications += AlertNotification(
+                        id = "t2:$windowKey".hashCode(),
+                        title = "${current.displayName} (${line.label})",
+                        body = "使用率が ${pct}% に到達しました（上限警告 ${high}%）",
+                    )
+                } else {
+                    mutable.putIfAbsent("t1:$windowKey", nowMs)
+                }
             } else if (pct >= low && !mutable.containsKey("t1:$windowKey")) {
                 mutable["t1:$windowKey"] = nowMs
                 notifications += AlertNotification(
