@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run unit tests and assemble unsigned release APK
+        run: |
+          chmod +x ./gradlew
+          ./gradlew test assembleRelease
+
+      - name: Package unsigned APK and checksums
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          SRC_APK="app/build/outputs/apk/release/app-release-unsigned.apk"
+          if [ ! -f "${SRC_APK}" ]; then
+            SRC_APK="app/build/outputs/apk/release/app-release.apk"
+          fi
+          if [ ! -f "${SRC_APK}" ]; then
+            echo "Release APK not found under app/build/outputs/apk/release/" >&2
+            exit 1
+          fi
+          mkdir -p dist
+          OUT_NAME="OpenTokenUsage-${VERSION}-release-unsigned.apk"
+          cp "${SRC_APK}" "dist/${OUT_NAME}"
+          (cd dist && sha256sum "${OUT_NAME}" > SHA256SUMS.txt)
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body: |
+            署名済み APK は後から追加されます。
+          files: |
+            dist/OpenTokenUsage-*-release-unsigned.apk
+            dist/SHA256SUMS.txt
