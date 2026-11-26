@@ -301,6 +301,10 @@ class CodexClient(
         addWindowLine(primary, primaryHeaderPct, "Session (5h)", 5L * 3600_000L, 1, isWeekly = false)
         addWindowLine(secondary, secondaryHeaderPct, "Weekly (7d)", 7L * 24L * 3600_000L, 2, isWeekly = true)
 
+        if (rateLimit == null) {
+            pushSpendControlLine(lines, nowMs, data)
+        }
+
         data.objOrNull("code_review_rate_limit")?.objOrNull("primary_window")?.let { rev ->
             addWindowLine(rev, null, "Code Review", 7L * 24L * 3600_000L, null, isWeekly = true)
         }
@@ -325,6 +329,31 @@ class CodexClient(
 
         if (lines.isEmpty()) throw ProviderProbeException("Codex の利用状況データが見つかりません")
         return ProbeResult(plan = data.strOrNull("plan_type"), lines = lines, updatedSecret = updatedSecret)
+    }
+
+    private fun pushSpendControlLine(lines: MutableList<MetricLine>, nowMs: Long, data: JsonObject) {
+        val ind = data.objOrNull("spend_control")?.objOrNull("individual_limit") ?: return
+        var usedPct = ind.doubleOrNull("used_percent")
+        if (usedPct == null) {
+            val spent = ind.doubleOrNull("used")
+            val cap = ind.doubleOrNull("limit")
+            if (spent != null && cap != null && cap > 0.0) {
+                usedPct = (spent / cap) * 100.0
+            }
+        }
+        if (usedPct == null) return
+        val resetAt = ind["reset_at"]?.let { ProviderHttpSupport.parseDateMs(it) }
+            ?: ind.doubleOrNull("reset_after_seconds")?.let { nowMs + (it * 1000.0).toLong() }
+        lines += MetricLine.Progress(
+            label = "Monthly",
+            used = usedPct.coerceIn(0.0, 100.0),
+            limit = 100.0,
+            format = MetricFormat.Percent,
+            resetsAtMs = resetAt,
+            periodDurationMs = 30L * 24L * 3600_000L,
+            primaryOrder = 1,
+            period = "monthly",
+        )
     }
 
     private suspend fun callUsage(base: String, token: String, accountId: String) = ProviderHttpSupport.get(
