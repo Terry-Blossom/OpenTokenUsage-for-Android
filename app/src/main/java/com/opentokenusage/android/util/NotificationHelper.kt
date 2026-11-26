@@ -24,8 +24,151 @@ import com.opentokenusage.android.domain.logic.UsageDisplayFormatter
 import com.opentokenusage.android.domain.model.AppSettings
 import com.opentokenusage.android.domain.model.MetricLine
 import com.opentokenusage.android.domain.model.ProviderSnapshot
+import com.opentokenusage.android.domain.model.groupResetCreditItems
 import com.opentokenusage.android.ui.theme.ProviderVisuals
 import kotlin.math.roundToInt
+
+internal data class AlertNotification(
+    val id: Int,
+    val title: String,
+    val body: String,
+)
+
+internal data class AlertEvaluationResult(
+    val notifications: List<AlertNotification>,
+    val updatedDedupeMap: Map<String, Long>,
+)
+
+private const val RESET_EXPIRY_7D_MS = 7L * 24L * 3600_000L
+private const val RESET_EXPIRY_24H_MS = 24L * 3600_000L
+
+internal fun evaluateAlertNotifications(
+    previous: ProviderSnapshot?,
+    current: ProviderSnapshot,
+    settings: AppSettings,
+    dedupeMap: Map<String, Long>,
+    nowMs: Long = System.currentTimeMillis(),
+): AlertEvaluationResult {
+    if (current.isStale || current.lines.isEmpty()) {
+        return AlertEvaluationResult(emptyList(), dedupeMap)
+    }
+    val mutable = dedupeMap.toMutableMap()
+    val notifications = mutableListOf<AlertNotification>()
+
+    val progressLines = current.lines.filterIsInstance<MetricLine.Progress>()
+    for (line in progressLines) {
+        val pct = (line.usedFraction * 100.0).roundToInt()
+        val windowKey = "${current.accountId}:${line.label}:${line.resetsAtMs ?: 0L}"
+
+        if (settings.notifyThresholdAlerts) {
+            val high = maxOf(settings.alertThreshold1, settings.alertThreshold2)
+            val low = minOf(settings.alertThreshold1, settings.alertThreshold2)
+            if (pct >= high && !mutable.containsKey("t2:$windowKey")) {
+                mutable["t2:$windowKey"] = nowMs
+                notifications += AlertNotification(
+                    id = "t2:$windowKey".hashCode(),
+                    title = "${current.displayName} (${line.label})",
+                    body = "使用率が ${pct}% に到達しました（上限警告 ${high}%）",
+                )
+            } else if (pct >= low && !mutable.containsKey("t1:$windowKey")) {
+                mutable["t1:$windowKey"] = nowMs
+                notifications += AlertNotification(
+                    id = "t1:$windowKey".hashCode(),
+                    title = "${current.displayName} (${line.label})",
+                    body = "使用率が ${pct}% に達しました（設定しきい値 ${low}%）",
+                )
+            }
+        }
+
+        if (settings.notifyPaceAlerts) {
+            val pace = PaceCalculator.calculate(
+                used = line.used,
+                limit = line.limit,
+                resetsAtMs = line.resetsAtMs,
+                periodDurationMs = line.periodDurationMs,
+                nowMs = nowMs,
+                workdays = settings.workdaysOnlyWeeklyPace,
+            )
+            if (pace != null && pace.tier == PaceTier.BEHIND && pace.etaToLimitMs != null && !mutable.containsKey("pace:$windowKey")) {
+                mutable["pace:$windowKey"] = nowMs
+                notifications += AlertNotification(
+                    id = "pace:$windowKey".hashCode(),
+                    title = "${current.displayName}: ペース超過",
+                    body = "${line.label} が現在のペースではリセット前に上限に達します",
+                )
+            }
+        }
+    }
+
+    if (settings.notifyResetAlerts && previous != null) {
+        val prevMap = previous.lines.filterIsInstance<MetricLine.Progress>().associateBy { it.label }
+        for (curLine in progressLines) {
+            val prevLine = prevMap[curLine.label] ?: continue
+            if (prevLine.usedFraction >= 0.25 && curLine.usedFraction <= 0.05 && prevLine.resetsAtMs != curLine.resetsAtMs) {
+                val resetKey = "reset:${current.accountId}:${curLine.label}:${curLine.resetsAtMs ?: nowMs}"
+                if (!mutable.containsKey(resetKey)) {
+                    mutable[resetKey] = nowMs
+                    notifications += AlertNotification(
+                        id = resetKey.hashCode(),
+                        title = "${current.displayName}: リセット完了",
+                        body = "${curLine.label} の利用枠がリセットされました",
+                    )
+                }
+            }
+        }
+    }
+
+    if (settings.notifyResetExpiryAlerts) {
+        val resetItems = groupResetCreditItems(
+            current.lines
+                .filterIsInstance<MetricLine.ResetCredit>()
+                .flatMap { it.activeItems(nowMs) },
+        )
+        for (item in resetItems) {
+            val expiresAtMs = item.expiresAtMs ?: continue
+            val remainingMs = expiresAtMs - nowMs
+            if (remainingMs <= 0L || remainingMs > RESET_EXPIRY_7D_MS) continue
+
+            val kindKey = item.kind ?: "default"
+            val expirySec = expiresAtMs / 1000L
+            val baseKey = "reset_expiry:${current.accountId}:$kindKey:$expirySec"
+            val itemDesc = if (item.kind != null) {
+                "${UsageDisplayFormatter.resetCreditKindLabelJa(item.kind)} (${item.count}回)"
+            } else {
+                "リセットクレジット (${item.count}回)"
+            }
+
+            if (remainingMs <= RESET_EXPIRY_24H_MS) {
+                val key24h = "$baseKey:24h"
+                if (!mutable.containsKey(key24h)) {
+                    mutable[key24h] = nowMs
+                    notifications += AlertNotification(
+                        id = key24h.hashCode(),
+                        title = "${current.displayName}: リセット期限まもなく",
+                        body = "${itemDesc} の有効期限まであと${UsageDisplayFormatter.formatDurationJa(remainingMs)}です（24時間以内）",
+                    )
+                }
+            } else {
+                val key7d = "$baseKey:7d"
+                if (!mutable.containsKey(key7d)) {
+                    mutable[key7d] = nowMs
+                    notifications += AlertNotification(
+                        id = key7d.hashCode(),
+                        title = "${current.displayName}: リセット期限のお知らせ",
+                        body = "${itemDesc} の有効期限まであと${UsageDisplayFormatter.formatDurationJa(remainingMs)}です（7日以内）",
+                    )
+                }
+            }
+        }
+    }
+
+    // Prune keys older than 30 days
+    val cutoff = nowMs - 30L * 24L * 3600_000L
+    return AlertEvaluationResult(
+        notifications = notifications,
+        updatedDedupeMap = mutable.filterValues { it >= cutoff },
+    )
+}
 
 class NotificationHelper(private val context: Context) {
 
@@ -163,8 +306,8 @@ class NotificationHelper(private val context: Context) {
         UsageDisplayFormatter.formatPercentShort(line.used, line.limit, settings.displayMode)
 
     /**
-     * Evaluates threshold, pace, and reset notifications and deduplicates across refreshes
-     * so each condition fires once per reset window. Returns updated dedupe timestamps.
+     * Evaluates threshold, pace, quota reset, and reset credit expiry notifications and
+     * deduplicates across refreshes. Returns updated dedupe timestamps.
      */
     fun evaluateAndNotify(
         previous: ProviderSnapshot?,
@@ -173,75 +316,21 @@ class NotificationHelper(private val context: Context) {
         dedupeMap: Map<String, Long>,
         nowMs: Long = System.currentTimeMillis(),
     ): Map<String, Long> {
-        if (current.isStale || current.lines.isEmpty()) return dedupeMap
-        val mutable = dedupeMap.toMutableMap()
-
-        val progressLines = current.lines.filterIsInstance<MetricLine.Progress>()
-        for (line in progressLines) {
-            val pct = (line.usedFraction * 100.0).roundToInt()
-            val windowKey = "${current.accountId}:${line.label}:${line.resetsAtMs ?: 0L}"
-
-            if (settings.notifyThresholdAlerts) {
-                val high = maxOf(settings.alertThreshold1, settings.alertThreshold2)
-                val low = minOf(settings.alertThreshold1, settings.alertThreshold2)
-                if (pct >= high && !mutable.containsKey("t2:$windowKey")) {
-                    mutable["t2:$windowKey"] = nowMs
-                    postNotification(
-                        id = "t2:$windowKey".hashCode(),
-                        title = "${current.displayName} (${line.label})",
-                        body = "使用率が ${pct}% に到達しました（上限警告 ${high}%）",
-                    )
-                } else if (pct >= low && !mutable.containsKey("t1:$windowKey")) {
-                    mutable["t1:$windowKey"] = nowMs
-                    postNotification(
-                        id = "t1:$windowKey".hashCode(),
-                        title = "${current.displayName} (${line.label})",
-                        body = "使用率が ${pct}% に達しました（設定しきい値 ${low}%）",
-                    )
-                }
-            }
-
-            if (settings.notifyPaceAlerts) {
-                val pace = PaceCalculator.calculate(
-                    used = line.used,
-                    limit = line.limit,
-                    resetsAtMs = line.resetsAtMs,
-                    periodDurationMs = line.periodDurationMs,
-                    nowMs = nowMs,
-                    workdays = settings.workdaysOnlyWeeklyPace,
-                )
-                if (pace != null && pace.tier == PaceTier.BEHIND && pace.etaToLimitMs != null && !mutable.containsKey("pace:$windowKey")) {
-                    mutable["pace:$windowKey"] = nowMs
-                    postNotification(
-                        id = "pace:$windowKey".hashCode(),
-                        title = "${current.displayName}: ペース超過",
-                        body = "${line.label} が現在のペースではリセット前に上限に達します",
-                    )
-                }
-            }
+        val result = evaluateAlertNotifications(
+            previous = previous,
+            current = current,
+            settings = settings,
+            dedupeMap = dedupeMap,
+            nowMs = nowMs,
+        )
+        for (notification in result.notifications) {
+            postNotification(
+                id = notification.id,
+                title = notification.title,
+                body = notification.body,
+            )
         }
-
-        if (settings.notifyResetAlerts && previous != null) {
-            val prevMap = previous.lines.filterIsInstance<MetricLine.Progress>().associateBy { it.label }
-            for (curLine in progressLines) {
-                val prevLine = prevMap[curLine.label] ?: continue
-                if (prevLine.usedFraction >= 0.25 && curLine.usedFraction <= 0.05 && prevLine.resetsAtMs != curLine.resetsAtMs) {
-                    val resetKey = "reset:${current.accountId}:${curLine.label}:${curLine.resetsAtMs ?: nowMs}"
-                    if (!mutable.containsKey(resetKey)) {
-                        mutable[resetKey] = nowMs
-                        postNotification(
-                            id = resetKey.hashCode(),
-                            title = "${current.displayName}: リセット完了",
-                            body = "${curLine.label} の利用枠がリセットされました",
-                        )
-                    }
-                }
-            }
-        }
-
-        // Prune keys older than 30 days
-        val cutoff = nowMs - 30L * 24L * 3600_000L
-        return mutable.filterValues { it >= cutoff }
+        return result.updatedDedupeMap
     }
 
     @SuppressLint("MissingPermission")

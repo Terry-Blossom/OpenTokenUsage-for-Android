@@ -20,6 +20,8 @@ class EmptyDefaultsTest {
         assertEquals(UsageDisplayMode.LEFT, defaults.displayMode)
         assertEquals(RefreshIntervalOption.MIN_15, defaults.refreshInterval)
         assertFalse(defaults.showMonthlyUsage)
+        assertFalse(defaults.notifyResetAlerts)
+        assertTrue(defaults.notifyResetExpiryAlerts)
         assertTrue(defaults.alertThreshold1 in 1..99)
         assertTrue(defaults.alertThreshold2 in 1..99)
     }
@@ -28,9 +30,13 @@ class EmptyDefaultsTest {
     fun settingsSerializationDefaultsAndPersistsShowMonthlyUsage() {
         val legacyDecoded = ProviderHttpSupport.json.decodeFromString<AppSettings>("""{"persistentNotificationEnabled":true}""")
         assertFalse(legacyDecoded.showMonthlyUsage)
+        assertTrue(legacyDecoded.notifyResetExpiryAlerts)
 
-        val encoded = ProviderHttpSupport.json.encodeToString(AppSettings(showMonthlyUsage = true))
+        val encoded = ProviderHttpSupport.json.encodeToString(
+            AppSettings(showMonthlyUsage = true, notifyResetExpiryAlerts = false),
+        )
         val roundTripped = ProviderHttpSupport.json.decodeFromString<AppSettings>(encoded)
         assertTrue(roundTripped.showMonthlyUsage)
+        assertFalse(roundTripped.notifyResetExpiryAlerts)
     }
 }

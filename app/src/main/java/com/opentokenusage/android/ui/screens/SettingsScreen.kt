@@ -389,6 +389,19 @@ fun SettingsScreen(
                     },
                 )
                 SwitchRow(
+                    title = "リセット期限の通知",
+                    checked = settings.notifyResetExpiryAlerts,
+                    onCheckedChange = { v ->
+                        if (v) ensureNotificationPermission()
+                        onUpdateSettings { it.copy(notifyResetExpiryAlerts = v) }
+                    },
+                )
+                Text(
+                    "保有中のリセットクレジットの有効期限が7日前・24時間前になったときに通知します。",
+                    color = colors.textMuted,
+                    fontSize = 11.sp,
+                )
+                SwitchRow(
                     title = "使用量を通知バーに常時表示",
                     checked = settings.persistentNotificationEnabled,
                     onCheckedChange = { enabled ->

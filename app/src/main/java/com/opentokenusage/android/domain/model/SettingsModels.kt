@@ -46,6 +46,7 @@ data class AppSettings(
     val notifyThresholdAlerts: Boolean = true,
     val notifyPaceAlerts: Boolean = false,
     val notifyResetAlerts: Boolean = false,
+    val notifyResetExpiryAlerts: Boolean = true,
     val persistentNotificationEnabled: Boolean = false,
     val showMonthlyUsage: Boolean = false,
     val showPaceMarkers: Boolean = true,
