@@ -16,6 +16,8 @@ import com.opentokenusage.android.data.storage.GateDecision
 import com.opentokenusage.android.data.storage.LocalAppStores
 import com.opentokenusage.android.data.storage.RateLimitGateStore
 import com.opentokenusage.android.domain.logic.SettingsBackupCodec
+import com.opentokenusage.android.domain.logic.SmartRefreshPolicy
+import com.opentokenusage.android.domain.logic.SmartRefreshState
 import com.opentokenusage.android.domain.logic.UsageDisplayFormatter
 import com.opentokenusage.android.domain.model.AccountSecret
 import com.opentokenusage.android.domain.model.AppSettings
@@ -69,6 +71,7 @@ class UsageRepository(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val perAccountLocks = ConcurrentHashMap<String, Mutex>()
+    private val smartRefreshStates = ConcurrentHashMap<String, SmartRefreshState>()
     private val refreshAllLock = Mutex()
     private val initMutex = Mutex()
     @Volatile private var initialized = false
@@ -251,6 +254,7 @@ class UsageRepository(
             secretsStore.saveSecret(accountId, newSecret)
         }
         gateStore.clear(accountId)
+        smartRefreshStates.remove(accountId)
         refreshAccount(accountId, isManual = true)
         updateWidgets()
     }
@@ -285,6 +289,7 @@ class UsageRepository(
 
         secretsStore.deleteSecret(accountId)
         gateStore.clear(accountId)
+        smartRefreshStates.remove(accountId)
         stores.deleteAccountHistory(accountId)
         stores.delete(accountId)
 
@@ -356,6 +361,44 @@ class UsageRepository(
         stores.removeWidgetBindings(appWidgetIds)
     }
 
+    suspend fun refreshDueSmartAccounts(nowMs: Long = System.currentTimeMillis()): Boolean {
+        initialize()
+        val enabledAccounts = _accounts.value.filter { it.enabled }
+        if (enabledAccounts.isEmpty()) {
+            updateWidgets()
+            return true
+        }
+        val dueAccounts = enabledAccounts.filter { account ->
+            SmartRefreshPolicy.isDue(smartRefreshStates[account.id], nowMs)
+        }
+        if (dueAccounts.isEmpty()) return true
+        return refreshAllLock.withLock {
+            _isRefreshing.value = true
+            try {
+                maybeRefreshFxRates()
+                val results = coroutineScope {
+                    dueAccounts.map { account ->
+                        async { refreshAccount(account.id, isManual = false) }
+                    }.awaitAll()
+                }
+                _lastSyncMs.value = System.currentTimeMillis()
+                updateWidgets()
+                results.all { it }
+            } finally {
+                _isRefreshing.value = false
+            }
+        }
+    }
+
+    fun nextForegroundRefreshDelayMs(nowMs: Long = System.currentTimeMillis()): Long? =
+        SmartRefreshPolicy.nextForegroundDelayMs(
+            interval = _settings.value.refreshInterval,
+            lastSyncMs = _lastSyncMs.value,
+            smartStates = smartRefreshStates,
+            enabledAccountIds = _accounts.value.filter { it.enabled }.map { it.id },
+            nowMs = nowMs,
+        )
+
     suspend fun refreshAll(isManual: Boolean): Boolean {
         initialize()
         val enabledAccounts = _accounts.value.filter { it.enabled }
@@ -391,6 +434,11 @@ class UsageRepository(
             val now = System.currentTimeMillis()
             val gate = gateStore.checkGate(accountId, account.providerId, isManual, now)
             if (gate is GateDecision.Blocked) {
+                smartRefreshStates[accountId] = SmartRefreshPolicy.onGateBlocked(
+                    current = smartRefreshStates[accountId] ?: SmartRefreshState(),
+                    waitMs = gate.waitMs,
+                    nowMs = now,
+                )
                 if (gate.isHardRateLimit && isManual) {
                     val status = refreshProviderStatus(account.providerId)
                     markErrorStale(
@@ -410,18 +458,34 @@ class UsageRepository(
             coroutineScope {
                 val statusDeferred = async { refreshProviderStatus(account.providerId) }
                 try {
+                    val previousSnapshot = _snapshots.value[accountId]
                     val res = clientRegistry.clientFor(account.providerId).probe(account, secret, now)
                     val serviceStatus = statusDeferred.await()
                     res.updatedSecret?.let { secretsStore.saveSecret(accountId, it) }
                     gateStore.recordSuccess(accountId, now)
-                    applyProbeResult(account, res, now, serviceStatus)
+                    val updatedSnapshot = applyProbeResult(account, res, now, serviceStatus)
+                    val usageChanged = SmartRefreshPolicy.hasProgressUsageChanged(previousSnapshot, updatedSnapshot)
+                    smartRefreshStates[accountId] = SmartRefreshPolicy.onSuccess(
+                        current = smartRefreshStates[accountId] ?: SmartRefreshState(),
+                        usageChanged = usageChanged,
+                        nowMs = now,
+                        minGapMs = RateLimitGateStore.minimumAutoGapMs(account.providerId),
+                    )
                     updateWidgets()
                     true
                 } catch (e: ProviderProbeException) {
                     val serviceStatus = statusDeferred.await()
-                    if (e.statusCode == 429 && e.retryAfterMs != null) {
+                    val rateLimitDelayMs = if (e.statusCode == 429 && e.retryAfterMs != null) {
                         gateStore.recordRateLimit(accountId, e.retryAfterMs, now)
+                        e.retryAfterMs.coerceIn(60_000L, 6 * 60 * 60_000L)
+                    } else {
+                        0L
                     }
+                    smartRefreshStates[accountId] = SmartRefreshPolicy.onFailure(
+                        current = smartRefreshStates[accountId] ?: SmartRefreshState(),
+                        nowMs = now,
+                        minDelayMs = rateLimitDelayMs,
+                    )
                     markErrorStale(
                         account = account,
                         errorMsg = e.message,
@@ -434,6 +498,10 @@ class UsageRepository(
                     false
                 } catch (e: Exception) {
                     val serviceStatus = statusDeferred.await()
+                    smartRefreshStates[accountId] = SmartRefreshPolicy.onFailure(
+                        current = smartRefreshStates[accountId] ?: SmartRefreshState(),
+                        nowMs = now,
+                    )
                     markErrorStale(
                         account = account,
                         errorMsg = e.message ?: "取得エラー",
@@ -465,7 +533,7 @@ class UsageRepository(
         result: com.opentokenusage.android.data.network.clients.ProbeResult,
         nowMs: Long,
         serviceStatus: ProviderServiceStatus? = _serviceStatuses.value[account.providerId],
-    ) {
+    ): ProviderSnapshot {
         val provider = ProviderId.fromId(account.providerId)
         val snap = ProviderSnapshot(
             accountId = account.id,
@@ -512,6 +580,7 @@ class UsageRepository(
         if (updatedDedupe != currentAlerts.lastAlertKeys) {
             stores.saveAlertState(AlertDedupeState(updatedDedupe))
         }
+        return snap
     }
 
     private suspend fun markErrorStale(

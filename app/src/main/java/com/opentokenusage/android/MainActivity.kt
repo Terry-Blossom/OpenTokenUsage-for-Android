@@ -17,7 +17,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.opentokenusage.android.ui.theme.LocalOtuColors
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -33,6 +35,11 @@ import com.opentokenusage.android.ui.screens.OverviewScreen
 import com.opentokenusage.android.ui.screens.ProviderDetailScreen
 import com.opentokenusage.android.ui.screens.SettingsScreen
 import com.opentokenusage.android.ui.theme.OpenTokenUsageTheme
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -64,14 +71,28 @@ class MainActivity : ComponentActivity() {
 
             LaunchedEffect(Unit) {
                 repo.initialize()
-                val interval = repo.settings.value.refreshInterval
-                val last = repo.lastSyncMs.value
-                val minStaleMs = (interval.minutes ?: Int.MAX_VALUE) * 60_000L
-                val needsSync = interval != RefreshIntervalOption.MANUAL &&
-                    repo.accounts.value.any { it.enabled } &&
-                    (last == null || System.currentTimeMillis() - last >= minStaleMs)
-                if (needsSync) {
-                    repo.refreshAll(isManual = false)
+                lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                    combine(
+                        repo.settings.map { it.refreshInterval }.distinctUntilChanged(),
+                        repo.accounts.map { list -> list.filter { it.enabled }.map { it.id } }.distinctUntilChanged(),
+                    ) { interval, enabledIds -> interval to enabledIds }
+                        .collectLatest { (interval, enabledIds) ->
+                            if (interval == RefreshIntervalOption.MANUAL || enabledIds.isEmpty()) {
+                                return@collectLatest
+                            }
+                            while (true) {
+                                val waitMs = repo.nextForegroundRefreshDelayMs() ?: return@collectLatest
+                                if (waitMs > 0L) {
+                                    delay(waitMs)
+                                }
+                                if (interval == RefreshIntervalOption.SMART) {
+                                    repo.refreshDueSmartAccounts()
+                                } else {
+                                    repo.refreshAll(isManual = false)
+                                }
+                                delay(1_000L)
+                            }
+                        }
                 }
             }
 

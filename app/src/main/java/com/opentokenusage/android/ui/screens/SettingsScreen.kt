@@ -342,6 +342,19 @@ fun SettingsScreen(
                         )
                     }
                 }
+                when (settings.refreshInterval) {
+                    RefreshIntervalOption.MIN_5 -> Text(
+                        "アプリ表示中は5分ごとに更新します。バックグラウンド時は Android（WorkManager）の制約により最短15分間隔になります。",
+                        color = colors.textMuted,
+                        fontSize = 11.sp,
+                    )
+                    RefreshIntervalOption.SMART -> Text(
+                        "アプリ表示中はアカウントごとに使用量の変化に応じて2→5→10→15分間隔で自動調整します。バックグラウンド時は最短15分間隔です。",
+                        color = colors.textMuted,
+                        fontSize = 11.sp,
+                    )
+                    else -> Unit
+                }
 
                 Text("使用量の表示基準", color = colors.textSecondary, fontSize = 12.sp)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

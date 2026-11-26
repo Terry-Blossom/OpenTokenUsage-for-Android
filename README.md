@@ -16,7 +16,11 @@ Android companion app and home-screen widgets inspired by [PowerUserZ/OpenTokenU
 - **Cursor X Subscription aware**: On the new Cursor X Subscription plans, only the shared weekly pool (`Total usage`) is shown; legacy plan, on-demand, and Grok Bot lines are hidden.
 - **Persistent notification**: Optional ongoing notification in the status bar with the latest usage per account, refreshed by the background schedule.
 - **Optional monthly usage line**: Optionally shows a compact monthly usage line below the weekly percentage in the persistent notification and 1x3 status strip widget for providers with monthly quotas.
-- **Background Refresh**: Periodic updates powered by `WorkManager` with pace calculation (`PaceCalculator`).
+- **Background & Foreground Refresh**:
+  - **5 minutes (while app is open)**: Refreshes every 5 minutes while the app is in the foreground (`STARTED`), and falls back to 15 minutes in the background.
+  - **Smart refresh**: Adapts per account while the app is in the foreground — polls every **2 minutes** when usage (`Progress` used/limit) changes, backs off **2 → 5 → 10 → 15 minutes** while unchanged, uses a separate **2 → 5 → 10 → 15 minutes** failure backoff, and respects per-provider rate-limit gates (`RateLimitGateStore`).
+  - **Android WorkManager constraint**: Background periodic sync runs via `WorkManager`, whose minimum interval on Android is **15 minutes** (so intervals shorter than 15 minutes apply while the app is displayed, and background sync runs at 15 minutes).
+  - Includes pace calculation (`PaceCalculator`).
 
 ## Supported Providers
 
