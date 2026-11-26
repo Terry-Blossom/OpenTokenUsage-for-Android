@@ -364,6 +364,7 @@ fun ProviderCard(
                                         )
                                     }
 
+                                    val (threshold1Pct, threshold2Pct) = settings.effectiveAlertThresholds(snapshot.accountId)
                                     UsageProgressBar(
                                         usedFraction = line.usedFraction.toFloat(),
                                         displayedFraction = displayedFrac,
@@ -373,8 +374,8 @@ fun ProviderCard(
                                         } else {
                                             null
                                         },
-                                        threshold1Pct = settings.alertThreshold1,
-                                        threshold2Pct = settings.alertThreshold2,
+                                        threshold1Pct = threshold1Pct,
+                                        threshold2Pct = threshold2Pct,
                                         displayMode = settings.displayMode,
                                     )
 

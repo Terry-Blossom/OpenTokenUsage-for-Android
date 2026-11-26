@@ -61,8 +61,9 @@ internal fun evaluateAlertNotifications(
         val windowKey = "${current.accountId}:${line.label}:${line.resetsAtMs ?: 0L}"
 
         if (settings.notifyThresholdAlerts) {
-            val high = maxOf(settings.alertThreshold1, settings.alertThreshold2)
-            val low = minOf(settings.alertThreshold1, settings.alertThreshold2)
+            val (t1, t2) = settings.effectiveAlertThresholds(current.accountId)
+            val high = maxOf(t1, t2)
+            val low = minOf(t1, t2)
             if (pct >= high && !mutable.containsKey("t2:$windowKey")) {
                 mutable["t2:$windowKey"] = nowMs
                 notifications += AlertNotification(

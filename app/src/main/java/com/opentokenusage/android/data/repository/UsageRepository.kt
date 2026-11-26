@@ -271,6 +271,12 @@ class UsageRepository(
         _snapshots.value = currentSnaps
         stores.saveSnapshots(currentSnaps)
 
+        if (_settings.value.accountAlertThresholds.containsKey(accountId)) {
+            val cleanedSettings = _settings.value.withAccountAlertThresholds(accountId, null)
+            _settings.value = cleanedSettings
+            stores.saveSettings(cleanedSettings)
+        }
+
         UsageRefreshScheduler.syncSchedule(context, _settings.value, hasAccounts = updated.isNotEmpty())
         updateWidgets()
     }

@@ -219,6 +219,7 @@ private fun SingleWidgetContent(
                 } else {
                     p.usedFraction.toFloat()
                 }
+                val (threshold1Pct, threshold2Pct) = settings.effectiveAlertThresholds(snapshot.accountId)
                 val bmp = WidgetBitmapRenderer.renderProgressBarBitmap(
                     displayedFraction = displayedFrac,
                     fillColorArgb = fillArgb,
@@ -227,8 +228,8 @@ private fun SingleWidgetContent(
                     tickColorArgb = tickArgb,
                     paceElapsedFraction = if (settings.showPaceMarkers) pace?.elapsedFraction?.toFloat() else null,
                     isLeftMode = settings.displayMode == UsageDisplayMode.LEFT,
-                    threshold1Pct = settings.alertThreshold1,
-                    threshold2Pct = settings.alertThreshold2,
+                    threshold1Pct = threshold1Pct,
+                    threshold2Pct = threshold2Pct,
                 )
                 Spacer(GlanceModifier.height(4.dp))
                 Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

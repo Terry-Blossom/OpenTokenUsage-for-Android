@@ -32,6 +32,14 @@ enum class AppThemeMode(val labelJa: String) {
 }
 
 @Serializable
+data class AccountAlertThresholds(
+    val threshold1: Int? = null,
+    val threshold2: Int? = null,
+) {
+    fun isEmpty(): Boolean = threshold1 == null && threshold2 == null
+}
+
+@Serializable
 data class AppSettings(
     val refreshInterval: RefreshIntervalOption = RefreshIntervalOption.MIN_15,
     val displayMode: UsageDisplayMode = UsageDisplayMode.LEFT,
@@ -43,6 +51,7 @@ data class AppSettings(
     val manualUsdRate: Double? = null,
     val alertThreshold1: Int = 75,
     val alertThreshold2: Int = 90,
+    val accountAlertThresholds: Map<String, AccountAlertThresholds> = emptyMap(),
     val notifyThresholdAlerts: Boolean = true,
     val notifyPaceAlerts: Boolean = false,
     val notifyResetAlerts: Boolean = false,
@@ -51,4 +60,27 @@ data class AppSettings(
     val showMonthlyUsage: Boolean = false,
     val showPaceMarkers: Boolean = true,
     val overviewMaxLines: Int = 4,
-)
+) {
+    fun effectiveAlertThresholds(accountId: String): Pair<Int, Int> {
+        val override = accountAlertThresholds[accountId]
+        val t1 = (override?.threshold1 ?: alertThreshold1).coerceIn(1, 99)
+        val t2 = (override?.threshold2 ?: alertThreshold2).coerceIn(1, 99)
+        return t1 to t2
+    }
+
+    fun withAccountAlertThresholds(
+        accountId: String,
+        thresholds: AccountAlertThresholds?,
+    ): AppSettings {
+        val updated = accountAlertThresholds.toMutableMap()
+        if (thresholds == null || thresholds.isEmpty()) {
+            updated.remove(accountId)
+        } else {
+            updated[accountId] = AccountAlertThresholds(
+                threshold1 = thresholds.threshold1?.coerceIn(1, 99),
+                threshold2 = thresholds.threshold2?.coerceIn(1, 99),
+            )
+        }
+        return copy(accountAlertThresholds = updated)
+    }
+}

@@ -36,7 +36,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -58,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.opentokenusage.android.domain.logic.PaceCalculator
 import com.opentokenusage.android.domain.logic.UsageDisplayFormatter
+import com.opentokenusage.android.domain.model.AccountAlertThresholds
 import com.opentokenusage.android.domain.model.AppSettings
 import com.opentokenusage.android.domain.model.MetricLine
 import com.opentokenusage.android.domain.model.ProviderId
@@ -69,6 +72,7 @@ import com.opentokenusage.android.ui.components.UsageSparklineChart
 import com.opentokenusage.android.ui.theme.LocalOtuColors
 import com.opentokenusage.android.ui.theme.ProviderVisuals
 import com.opentokenusage.android.widget.UsageSingleWidgetReceiver
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -83,6 +87,7 @@ fun ProviderDetailScreen(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onToggleResetMode: () -> Unit,
+    onUpdateAlertThresholds: (AccountAlertThresholds?) -> Unit = {},
     onBack: () -> Unit,
 ) {
     val colors = LocalOtuColors.current
@@ -268,13 +273,14 @@ fun ProviderDetailScreen(
                                             fontWeight = FontWeight.Bold,
                                         )
                                     }
+                                    val (threshold1Pct, threshold2Pct) = settings.effectiveAlertThresholds(snapshot.accountId)
                                     UsageProgressBar(
                                         usedFraction = line.usedFraction.toFloat(),
                                         displayedFraction = displayedFrac,
                                         fillColor = barColor,
                                         paceElapsedFraction = if (settings.showPaceMarkers) pace?.elapsedFraction?.toFloat() else null,
-                                        threshold1Pct = settings.alertThreshold1,
-                                        threshold2Pct = settings.alertThreshold2,
+                                        threshold1Pct = threshold1Pct,
+                                        threshold2Pct = threshold2Pct,
                                         displayMode = settings.displayMode,
                                     )
                                     val paceText = UsageDisplayFormatter.formatPaceDetailJa(pace, line.limit, line.format, settings, fxRates)
@@ -395,6 +401,96 @@ fun ProviderDetailScreen(
                                         Text("${line.currencySymbol}${line.amount}", color = colors.textPrimary, fontSize = 12.sp)
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (isOwnedAccount) {
+                val customThresholds = settings.accountAlertThresholds[snapshot.accountId]
+                val hasCustomThresholds = customThresholds != null && !customThresholds.isEmpty()
+                val (effectiveT1, effectiveT2) = settings.effectiveAlertThresholds(snapshot.accountId)
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    color = colors.card,
+                    border = BorderStroke(1.dp, colors.border),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "警告しきい値（このアカウント）",
+                                    color = colors.textPrimary,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(
+                                    text = if (hasCustomThresholds) {
+                                        "個別設定を適用中（${effectiveT1}% / ${effectiveT2}%）"
+                                    } else {
+                                        "全体設定を使用中（${settings.alertThreshold1}% / ${settings.alertThreshold2}%）"
+                                    },
+                                    color = colors.textMuted,
+                                    fontSize = 11.sp,
+                                )
+                            }
+                            Switch(
+                                checked = hasCustomThresholds,
+                                onCheckedChange = { enabled ->
+                                    if (enabled) {
+                                        onUpdateAlertThresholds(
+                                            AccountAlertThresholds(
+                                                threshold1 = settings.alertThreshold1,
+                                                threshold2 = settings.alertThreshold2,
+                                            ),
+                                        )
+                                    } else {
+                                        onUpdateAlertThresholds(null)
+                                    }
+                                },
+                            )
+                        }
+                        if (hasCustomThresholds) {
+                            Text("警告ライン1: ${effectiveT1}%", color = colors.textSecondary, fontSize = 12.sp)
+                            Slider(
+                                value = effectiveT1.toFloat().coerceIn(20f, 95f),
+                                onValueChange = { v ->
+                                    onUpdateAlertThresholds(
+                                        AccountAlertThresholds(
+                                            threshold1 = v.roundToInt(),
+                                            threshold2 = effectiveT2,
+                                        ),
+                                    )
+                                },
+                                valueRange = 20f..95f,
+                            )
+                            Text("警告ライン2: ${effectiveT2}%", color = colors.textSecondary, fontSize = 12.sp)
+                            Slider(
+                                value = effectiveT2.toFloat().coerceIn(30f, 99f),
+                                onValueChange = { v ->
+                                    onUpdateAlertThresholds(
+                                        AccountAlertThresholds(
+                                            threshold1 = effectiveT1,
+                                            threshold2 = v.roundToInt(),
+                                        ),
+                                    )
+                                },
+                                valueRange = 30f..99f,
+                            )
+                            TextButton(
+                                onClick = { onUpdateAlertThresholds(null) },
+                                modifier = Modifier.align(Alignment.End),
+                            ) {
+                                Text("全体設定に戻す", fontSize = 12.sp)
                             }
                         }
                     }

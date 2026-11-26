@@ -1,6 +1,7 @@
 package com.opentokenusage.android
 
 import com.opentokenusage.android.data.network.ProviderHttpSupport
+import com.opentokenusage.android.domain.model.AccountAlertThresholds
 import com.opentokenusage.android.domain.model.AppSettings
 import com.opentokenusage.android.domain.model.RefreshIntervalOption
 import com.opentokenusage.android.domain.model.UsageDisplayMode
@@ -24,6 +25,7 @@ class EmptyDefaultsTest {
         assertTrue(defaults.notifyResetExpiryAlerts)
         assertTrue(defaults.alertThreshold1 in 1..99)
         assertTrue(defaults.alertThreshold2 in 1..99)
+        assertTrue(defaults.accountAlertThresholds.isEmpty())
     }
 
     @Test
@@ -31,12 +33,18 @@ class EmptyDefaultsTest {
         val legacyDecoded = ProviderHttpSupport.json.decodeFromString<AppSettings>("""{"persistentNotificationEnabled":true}""")
         assertFalse(legacyDecoded.showMonthlyUsage)
         assertTrue(legacyDecoded.notifyResetExpiryAlerts)
+        assertTrue(legacyDecoded.accountAlertThresholds.isEmpty())
 
         val encoded = ProviderHttpSupport.json.encodeToString(
-            AppSettings(showMonthlyUsage = true, notifyResetExpiryAlerts = false),
+            AppSettings(
+                showMonthlyUsage = true,
+                notifyResetExpiryAlerts = false,
+                accountAlertThresholds = mapOf("acc1" to AccountAlertThresholds(60, 85)),
+            ),
         )
         val roundTripped = ProviderHttpSupport.json.decodeFromString<AppSettings>(encoded)
         assertTrue(roundTripped.showMonthlyUsage)
         assertFalse(roundTripped.notifyResetExpiryAlerts)
+        assertEquals(AccountAlertThresholds(60, 85), roundTripped.accountAlertThresholds["acc1"])
     }
 }

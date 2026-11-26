@@ -193,6 +193,13 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
                                 },
+                                onUpdateAlertThresholds = { thresholds ->
+                                    scope.launch {
+                                        repo.updateSettings { s ->
+                                            s.withAccountAlertThresholds(accountId, thresholds)
+                                        }
+                                    }
+                                },
                                 onBack = { navController.popBackStack() },
                             )
                         }
