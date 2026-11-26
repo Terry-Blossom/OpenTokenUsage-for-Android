@@ -11,6 +11,7 @@ object ProviderVisuals {
         "amp" -> R.drawable.ic_provider_amp
         "antigravity" -> R.drawable.ic_provider_antigravity
         "claude" -> R.drawable.ic_provider_claude
+        "codebuff" -> R.drawable.ic_provider_codebuff
         "codex" -> R.drawable.ic_provider_codex
         "copilot" -> R.drawable.ic_provider_copilot
         "cursor" -> R.drawable.ic_provider_cursor
@@ -19,7 +20,8 @@ object ProviderVisuals {
         "devin" -> R.drawable.ic_provider_devin
         "factory" -> R.drawable.ic_provider_factory
         "grok" -> R.drawable.ic_provider_grok
-        "kimi" -> R.drawable.ic_provider_kimi
+        "kilo" -> R.drawable.ic_provider_kilo
+        "kimi", "kimi-api" -> R.drawable.ic_provider_kimi
         "kiro" -> R.drawable.ic_provider_kiro
         "minimax" -> R.drawable.ic_provider_minimax
         "muse" -> R.drawable.ic_provider_muse
@@ -40,7 +42,7 @@ object ProviderVisuals {
     fun iconTint(providerId: String, isDark: Boolean): Color =
         when (providerId.lowercase()) {
             "grok", "opencode-go" -> Color(0xFF000000)
-            "codex", "cursor", "devin", "factory", "kimi", "synthetic", "zai" ->
+            "codex", "cursor", "devin", "factory", "kimi", "kimi-api", "synthetic", "zai" ->
                 if (isDark) Color(0xFFF3F4F6) else Color(0xFF18181B)
             else -> barColor(providerId, isDark)
         }

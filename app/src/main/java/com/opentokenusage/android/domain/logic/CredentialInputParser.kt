@@ -91,6 +91,9 @@ object CredentialInputParser {
             ProviderId.OPENCODE_GO,
             ProviderId.AMP,
             ProviderId.DEVIN,
+            ProviderId.KIMI_API,
+            ProviderId.KILO,
+            ProviderId.CODEBUFF,
             ProviderId.CUSTOM_BALANCE,
         )
 
@@ -215,6 +218,34 @@ object CredentialInputParser {
                         accountId = projectId,
                     ),
                     detectedNote = "Antigravity 認証 JSON を読み込みました",
+                )
+            }
+            ProviderId.KILO -> {
+                val kiloObj = (root["kilo"] as? JsonObject) ?: root
+                val token = (
+                    kiloObj.str("access")
+                        ?: root.str("apiKey")
+                        ?: root.str("api_key")
+                        ?: root.str("accessToken")
+                        ?: root.str("token")
+                    ).orEmpty()
+                ParsedCredentialInput(
+                    secret = AccountSecret(apiKey = token),
+                    detectedNote = "Kilo 認証 JSON を読み込みました",
+                )
+            }
+            ProviderId.CODEBUFF -> {
+                val defObj = root["default"] as? JsonObject
+                val token = (
+                    defObj?.str("authToken")
+                        ?: root.str("authToken")
+                        ?: root.str("apiKey")
+                        ?: root.str("api_key")
+                        ?: root.str("token")
+                    ).orEmpty()
+                ParsedCredentialInput(
+                    secret = AccountSecret(apiKey = token),
+                    detectedNote = "Codebuff 認証 JSON を読み込みました",
                 )
             }
             else -> {

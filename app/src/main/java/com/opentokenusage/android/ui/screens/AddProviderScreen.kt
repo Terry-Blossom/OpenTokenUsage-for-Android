@@ -158,6 +158,8 @@ fun AddProviderScreen(
                                     val sub = when {
                                         p == ProviderId.ANTIGRAVITY -> "Google ログイン / OAuth トークン"
                                         p == ProviderId.CUSTOM_BALANCE -> "ベース URL・API キー（New API / Sub2API / 独自・複数登録可）"
+                                        p == ProviderId.KIMI_API -> "Moonshot API キー（従量課金残高）"
+                                        p == ProviderId.KILO || p == ProviderId.CODEBUFF -> "API キー / CLI 認証 JSON"
                                         p == ProviderId.CURSOR || p == ProviderId.GROK -> "crsr_ APIキー / トークン"
                                         p.authMode == ProviderAuthMode.API_KEY -> "APIキーで接続"
                                         p.authMode == ProviderAuthMode.OAUTH_OR_JSON -> "OAuthトークン / 認証JSON"
