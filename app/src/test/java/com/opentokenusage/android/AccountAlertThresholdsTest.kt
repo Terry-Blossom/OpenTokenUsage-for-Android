@@ -5,6 +5,7 @@ import com.opentokenusage.android.domain.model.AppSettings
 import com.opentokenusage.android.domain.model.MetricLine
 import com.opentokenusage.android.domain.model.ProviderSnapshot
 import com.opentokenusage.android.util.evaluateAlertNotifications
+import com.opentokenusage.android.util.normalizeResetBucketMs
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -177,5 +178,87 @@ class AccountAlertThresholdsTest {
             nowMs = 1_780_000_120_000L,
         )
         assertTrue(third.notifications.isEmpty())
+    }
+
+    @Test
+    fun roundsResetsAtMsToPreventDuplicateAlertsOnRelativeTimestampJitter() {
+        val baseResetMs = 1_780_020_000_000L // exact 10-minute boundary
+        val fiveHoursMs = 5L * 3600_000L
+
+        assertEquals(
+            normalizeResetBucketMs(baseResetMs - 450L, fiveHoursMs),
+            normalizeResetBucketMs(baseResetMs + 850L, fiveHoursMs),
+        )
+        // Short window (< 1h) rounds to 1-minute buckets
+        assertEquals(
+            normalizeResetBucketMs(1_780_020_060_000L - 300L, 15L * 60_000L),
+            normalizeResetBucketMs(1_780_020_060_000L + 400L, 15L * 60_000L),
+        )
+
+        fun codexSnapshot(usedPct: Double, resetsAtMs: Long) = ProviderSnapshot(
+            accountId = "codex1",
+            providerId = "codex",
+            displayName = "Codex",
+            fetchedAtMs = baseResetMs - 2L * 3600_000L,
+            lines = listOf(
+                MetricLine.Progress(
+                    label = "Session (5h)",
+                    used = usedPct,
+                    limit = 100.0,
+                    resetsAtMs = resetsAtMs,
+                    periodDurationMs = fiveHoursMs,
+                    primaryOrder = 1,
+                ),
+            ),
+        )
+
+        val settings = AppSettings(
+            alertThreshold1 = 75,
+            alertThreshold2 = 90,
+            notifyThresholdAlerts = true,
+            notifyPaceAlerts = true,
+            notifyResetAlerts = true,
+        )
+        val nowMs = baseResetMs - 4L * 3600_000L // 1h elapsed in 5h window, 80% used -> BEHIND pace too
+
+        val first = evaluateAlertNotifications(
+            previous = null,
+            current = codexSnapshot(80.0, baseResetMs - 350L),
+            settings = settings,
+            dedupeMap = emptyMap(),
+            nowMs = nowMs,
+        )
+        assertEquals(2, first.notifications.size) // 75% threshold + pace alert
+
+        // Next refresh has millisecond/second jitter in relative resetsAtMs -> must NOT duplicate alerts
+        val jittered = evaluateAlertNotifications(
+            previous = codexSnapshot(80.0, baseResetMs - 350L),
+            current = codexSnapshot(82.0, baseResetMs + 1_250L),
+            settings = settings,
+            dedupeMap = first.updatedDedupeMap,
+            nowMs = nowMs + 120_000L,
+        )
+        assertTrue(jittered.notifications.isEmpty())
+
+        // Genuine next window (+5h) fires reset alert once and allows alerts in the new window
+        val newWindowReset = baseResetMs + fiveHoursMs
+        val resetFirst = evaluateAlertNotifications(
+            previous = codexSnapshot(82.0, baseResetMs + 1_250L),
+            current = codexSnapshot(2.0, newWindowReset - 400L),
+            settings = settings,
+            dedupeMap = jittered.updatedDedupeMap,
+            nowMs = baseResetMs + 60_000L,
+        )
+        assertEquals(1, resetFirst.notifications.size)
+        assertTrue(resetFirst.notifications.single().title.contains("リセット完了"))
+
+        val resetJittered = evaluateAlertNotifications(
+            previous = codexSnapshot(82.0, baseResetMs + 1_250L),
+            current = codexSnapshot(3.0, newWindowReset + 700L),
+            settings = settings,
+            dedupeMap = resetFirst.updatedDedupeMap,
+            nowMs = baseResetMs + 180_000L,
+        )
+        assertTrue(resetJittered.notifications.isEmpty())
     }
 }

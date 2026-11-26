@@ -41,6 +41,27 @@ internal data class AlertEvaluationResult(
 
 private const val RESET_EXPIRY_7D_MS = 7L * 24L * 3600_000L
 private const val RESET_EXPIRY_24H_MS = 24L * 3600_000L
+private const val RESET_BUCKET_SHORT_MS = 60_000L
+private const val RESET_BUCKET_DEFAULT_MS = 10L * 60_000L
+
+/**
+ * Rounds [resetsAtMs] to the nearest coarse bucket (1 minute for windows shorter than 1 hour,
+ * 10 minutes otherwise) so millisecond/second drift in relative reset timestamps does not change
+ * alert deduplication keys across refreshes.
+ */
+internal fun normalizeResetBucketMs(
+    resetsAtMs: Long?,
+    periodDurationMs: Long? = null,
+): Long {
+    val raw = resetsAtMs ?: return 0L
+    if (raw <= 0L) return 0L
+    val bucketMs = if (periodDurationMs != null && periodDurationMs < 60L * 60_000L) {
+        RESET_BUCKET_SHORT_MS
+    } else {
+        RESET_BUCKET_DEFAULT_MS
+    }
+    return ((raw + bucketMs / 2L) / bucketMs) * bucketMs
+}
 
 internal fun evaluateAlertNotifications(
     previous: ProviderSnapshot?,
@@ -58,7 +79,8 @@ internal fun evaluateAlertNotifications(
     val progressLines = current.lines.filterIsInstance<MetricLine.Progress>()
     for (line in progressLines) {
         val pct = (line.usedFraction * 100.0).roundToInt()
-        val windowKey = "${current.accountId}:${line.label}:${line.resetsAtMs ?: 0L}"
+        val resetBucketMs = normalizeResetBucketMs(line.resetsAtMs, line.periodDurationMs)
+        val windowKey = "${current.accountId}:${line.label}:$resetBucketMs"
 
         if (settings.notifyThresholdAlerts) {
             val (t1, t2) = settings.effectiveAlertThresholds(current.accountId)
@@ -110,8 +132,11 @@ internal fun evaluateAlertNotifications(
         val prevMap = previous.lines.filterIsInstance<MetricLine.Progress>().associateBy { it.label }
         for (curLine in progressLines) {
             val prevLine = prevMap[curLine.label] ?: continue
-            if (prevLine.usedFraction >= 0.25 && curLine.usedFraction <= 0.05 && prevLine.resetsAtMs != curLine.resetsAtMs) {
-                val resetKey = "reset:${current.accountId}:${curLine.label}:${curLine.resetsAtMs ?: nowMs}"
+            val prevBucket = normalizeResetBucketMs(prevLine.resetsAtMs, prevLine.periodDurationMs)
+            val curBucket = normalizeResetBucketMs(curLine.resetsAtMs, curLine.periodDurationMs)
+            if (prevLine.usedFraction >= 0.25 && curLine.usedFraction <= 0.05 && prevBucket != curBucket) {
+                val resetBucket = if (curBucket > 0L) curBucket else normalizeResetBucketMs(nowMs, curLine.periodDurationMs)
+                val resetKey = "reset:${current.accountId}:${curLine.label}:$resetBucket"
                 if (!mutable.containsKey(resetKey)) {
                     mutable[resetKey] = nowMs
                     notifications += AlertNotification(
