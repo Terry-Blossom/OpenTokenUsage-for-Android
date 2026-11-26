@@ -73,6 +73,7 @@ import com.opentokenusage.android.domain.model.ProviderAuthMode
 import com.opentokenusage.android.domain.model.ProviderId
 import com.opentokenusage.android.ui.theme.LocalOtuColors
 import com.opentokenusage.android.ui.theme.ProviderVisuals
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -315,8 +316,10 @@ private fun ProviderCredentialForm(
             trimmed.contains("%3A%3A") ||
             (provider == ProviderId.DEVIN && trimmed.contains("="))
         ) {
-            val parsed = CredentialInputParser.parse(provider, trimmed, refreshTokenInput, accountIdOrArn, awsRegion)
-            detectedHint = parsed.detectedNote
+            val parsed = runCatching {
+                CredentialInputParser.parse(provider, trimmed, refreshTokenInput, accountIdOrArn, awsRegion)
+            }.getOrNull()
+            detectedHint = parsed?.detectedNote
         } else {
             detectedHint = null
         }
@@ -785,6 +788,10 @@ private fun ProviderCredentialForm(
                                     onUpdate(editingAccount.id, alias, region, effectiveHost, secretToSave, customConfig)
                                     onBack()
                                 }
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                errorMsg = e.message?.takeIf { it.isNotBlank() } ?: "認証情報の解析に失敗しました"
                             } finally {
                                 isSubmitting = false
                             }

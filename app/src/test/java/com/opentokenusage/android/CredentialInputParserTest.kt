@@ -92,4 +92,55 @@ class CredentialInputParserTest {
         assertEquals("1//0gDirect", parsedRaw.secret.refreshToken)
         assertEquals("proj-gamma", parsedRaw.secret.accountId)
     }
+
+    @Test
+    fun handlesJsonNullNestedObjectsWithoutCrashing() {
+        val codexNull = CredentialInputParser.parse(
+            providerId = ProviderId.CODEX,
+            primaryInput = """{"tokens": null}""",
+            secondaryRefreshToken = "rt_fallback",
+            accountIdOrArn = "acc_fallback",
+        )
+        assertEquals("", codexNull.secret.accessToken)
+        assertEquals("rt_fallback", codexNull.secret.refreshToken)
+        assertEquals("acc_fallback", codexNull.secret.accountId)
+
+        val codexNullWithRoot = CredentialInputParser.parse(
+            providerId = ProviderId.CODEX,
+            primaryInput = """{"tokens": null, "access_token": "tok_root"}""",
+        )
+        assertEquals("tok_root", codexNullWithRoot.secret.accessToken)
+
+        val codexWrongType = CredentialInputParser.parse(
+            providerId = ProviderId.CODEX,
+            primaryInput = """{"tokens": "not-an-object"}""",
+        )
+        assertEquals("", codexWrongType.secret.accessToken)
+
+        val claudeNull = CredentialInputParser.parse(
+            providerId = ProviderId.CLAUDE,
+            primaryInput = """{"claudeAiOauth": null}""",
+            secondaryRefreshToken = "rt_claude_fallback",
+        )
+        assertEquals("", claudeNull.secret.accessToken)
+        assertEquals("rt_claude_fallback", claudeNull.secret.refreshToken)
+
+        val claudeNullWithRoot = CredentialInputParser.parse(
+            providerId = ProviderId.CLAUDE,
+            primaryInput = """{"claudeAiOauth": null, "accessToken": "sk-ant-root"}""",
+        )
+        assertEquals("sk-ant-root", claudeNullWithRoot.secret.accessToken)
+
+        val antigravityNull = CredentialInputParser.parse(
+            providerId = ProviderId.ANTIGRAVITY,
+            primaryInput = """{"accounts": [null], "refreshToken": "1//rootRefresh"}""",
+        )
+        assertEquals("1//rootRefresh", antigravityNull.secret.refreshToken)
+
+        val kiloNull = CredentialInputParser.parse(ProviderId.KILO, """{"kilo": null, "apiKey": "kilo_root"}""")
+        assertEquals("kilo_root", kiloNull.secret.apiKey)
+
+        val codebuffNull = CredentialInputParser.parse(ProviderId.CODEBUFF, """{"default": null, "authToken": "cb_root"}""")
+        assertEquals("cb_root", codebuffNull.secret.apiKey)
+    }
 }

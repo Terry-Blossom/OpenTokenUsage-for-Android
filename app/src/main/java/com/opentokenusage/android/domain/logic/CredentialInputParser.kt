@@ -5,13 +5,11 @@ import com.opentokenusage.android.domain.model.ProviderId
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import java.util.Base64
 
@@ -39,7 +37,7 @@ object CredentialInputParser {
         val extraId = accountIdOrArn.trim()
 
         if (raw.startsWith("{")) {
-            val parsedObj = runCatching { json.parseToJsonElement(raw).jsonObject }.getOrNull()
+            val parsedObj = runCatching { json.parseToJsonElement(raw) as? JsonObject }.getOrNull()
             if (parsedObj != null) {
                 return parseJsonObject(providerId, parsedObj, refreshOverride, extraId, awsRegion)
             }
@@ -139,7 +137,7 @@ object CredentialInputParser {
     ): ParsedCredentialInput {
         return when (providerId) {
             ProviderId.CLAUDE -> {
-                val oauth = root["claudeAiOauth"]?.jsonObject ?: root
+                val oauth = (root["claudeAiOauth"] as? JsonObject) ?: root
                 val access = oauth.str("accessToken") ?: oauth.str("access_token").orEmpty()
                 val refresh = (oauth.str("refreshToken") ?: oauth.str("refresh_token")).orEmpty()
                     .ifBlank { refreshOverride }
@@ -150,7 +148,7 @@ object CredentialInputParser {
                 )
             }
             ProviderId.CODEX -> {
-                val tokens = root["tokens"]?.jsonObject ?: root
+                val tokens = (root["tokens"] as? JsonObject) ?: root
                 val access = (tokens.str("access_token") ?: tokens.str("accessToken")).orEmpty()
                 val refresh = (tokens.str("refresh_token") ?: tokens.str("refreshToken")).orEmpty()
                     .ifBlank { refreshOverride }
@@ -187,9 +185,7 @@ object CredentialInputParser {
                 )
             }
             ProviderId.ANTIGRAVITY -> {
-                val firstAccount = (root["accounts"] as? JsonArray)?.firstOrNull()?.let {
-                    runCatching { it.jsonObject }.getOrNull()
-                }
+                val firstAccount = (root["accounts"] as? JsonArray)?.firstOrNull() as? JsonObject
                 val source = firstAccount ?: root
                 val access = (source.str("accessToken") ?: source.str("access_token") ?: source.str("access")).orEmpty()
                 val rawRefresh = (
@@ -275,8 +271,8 @@ object CredentialInputParser {
         if (parts.size < 2) return null
         return runCatching {
             val decoded = String(Base64.getUrlDecoder().decode(padBase64(parts[1])), Charsets.UTF_8)
-            val payload = json.parseToJsonElement(decoded).jsonObject
-            val expSec = payload["exp"]?.jsonPrimitive?.doubleOrNull ?: return null
+            val payload = json.parseToJsonElement(decoded) as? JsonObject ?: return null
+            val expSec = (payload["exp"] as? JsonPrimitive)?.doubleOrNull ?: return null
             (expSec * 1000.0).toLong()
         }.getOrNull()
     }
@@ -286,8 +282,10 @@ object CredentialInputParser {
         if (parts.size < 2) return null
         return runCatching {
             val decoded = String(Base64.getUrlDecoder().decode(padBase64(parts[1])), Charsets.UTF_8)
-            val payload = json.parseToJsonElement(decoded).jsonObject
-            payload["sub"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
+            val payload = json.parseToJsonElement(decoded) as? JsonObject ?: return null
+            val sub = payload["sub"]
+            if (sub is JsonNull) return null
+            (sub as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
         }.getOrNull()
     }
 
@@ -296,8 +294,11 @@ object CredentialInputParser {
         return if (mod == 0) segment else segment + "=".repeat(4 - mod)
     }
 
-    private fun JsonObject.str(key: String): String? =
-        (this[key] as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
+    private fun JsonObject.str(key: String): String? {
+        val el = this[key] ?: return null
+        if (el is JsonNull) return null
+        return (el as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
+    }
 
     private fun JsonObject.timestampMs(key: String): Long? {
         val el: JsonElement = this[key] ?: return null
