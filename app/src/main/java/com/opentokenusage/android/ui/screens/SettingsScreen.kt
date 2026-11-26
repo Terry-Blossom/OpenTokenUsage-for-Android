@@ -28,11 +28,15 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.ArrowDownward
 import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Widgets
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -43,18 +47,25 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.opentokenusage.android.BuildConfig
+import com.opentokenusage.android.data.update.ApkInstaller
+import com.opentokenusage.android.data.update.AppUpdater
+import com.opentokenusage.android.data.update.AvailableUpdate
 import com.opentokenusage.android.domain.logic.CurrencyFormatter
 import com.opentokenusage.android.domain.model.AppSettings
 import com.opentokenusage.android.domain.model.AppThemeMode
@@ -67,6 +78,8 @@ import com.opentokenusage.android.ui.theme.LocalOtuColors
 import com.opentokenusage.android.ui.theme.ProviderVisuals
 import com.opentokenusage.android.widget.UsageOverviewWidgetReceiver
 import com.opentokenusage.android.widget.UsageSingleWidgetReceiver
+import com.opentokenusage.android.widget.UsageStatusStripWidgetReceiver
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -74,6 +87,7 @@ import kotlin.math.roundToInt
 fun SettingsScreen(
     settings: AppSettings,
     accounts: List<ConfiguredAccount>,
+    appUpdater: AppUpdater,
     onUpdateSettings: ((AppSettings) -> AppSettings) -> Unit,
     onToggleAccountEnabled: (String, Boolean) -> Unit,
     onMoveAccount: (String, Int) -> Unit,
@@ -109,6 +123,48 @@ fun SettingsScreen(
             notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
+
+    var updateState by remember { mutableStateOf<UpdateUiState>(UpdateUiState.Idle) }
+    var installPermissionMissing by remember { mutableStateOf(false) }
+    val updaterScope = rememberCoroutineScope()
+
+    fun checkForUpdates() {
+        if (updateState is UpdateUiState.Checking || updateState is UpdateUiState.Downloading) return
+        updaterScope.launch {
+            updateState = UpdateUiState.Checking
+            appUpdater.checkForUpdate()
+                .onSuccess { update ->
+                    updateState = if (update == null) UpdateUiState.UpToDate else UpdateUiState.Available(update)
+                }
+                .onFailure { error ->
+                    updateState = UpdateUiState.Failed(error.message ?: "更新を確認できませんでした")
+                }
+        }
+    }
+
+    fun downloadAndInstall(update: AvailableUpdate) {
+        if (!ApkInstaller.canInstall(context)) {
+            installPermissionMissing = true
+            ApkInstaller.openInstallPermissionSettings(context)
+            return
+        }
+        installPermissionMissing = false
+        updaterScope.launch {
+            updateState = UpdateUiState.Downloading(0f)
+            appUpdater.downloadApk(update) { progress ->
+                updateState = UpdateUiState.Downloading(progress)
+            }.onSuccess { apkFile ->
+                updateState = UpdateUiState.Available(update)
+                if (!ApkInstaller.install(context, apkFile)) {
+                    updateState = UpdateUiState.Failed("インストーラーを起動できませんでした")
+                }
+            }.onFailure { error ->
+                updateState = UpdateUiState.Failed(error.message ?: "ダウンロードに失敗しました")
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) { checkForUpdates() }
 
     fun requestPin(receiverClass: Class<*>) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -146,7 +202,7 @@ fun SettingsScreen(
         ) {
             SettingsSection("ホーム画面ウィジェット") {
                 Text(
-                    text = "一覧ウィジェット（複数アカウント表示）と個別ウィジェット（2x1コンパクト）をホーム画面に設置できます。",
+                    text = "一覧（複数アカウント）、個別（2x1コンパクト）、通知バー風（1x3）をホーム画面に設置できます。",
                     color = colors.textSecondary,
                     fontSize = 12.sp,
                 )
@@ -174,6 +230,16 @@ fun SettingsScreen(
                         Spacer(Modifier.width(5.dp))
                         Text("個別を追加", fontSize = 12.sp)
                     }
+                }
+                OutlinedButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, colors.border),
+                    onClick = { requestPin(UsageStatusStripWidgetReceiver::class.java) },
+                ) {
+                    Icon(Icons.Outlined.Widgets, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(5.dp))
+                    Text("通知バー風（1x3）を追加", fontSize = 12.sp)
                 }
                 if (widgetPinMessage != null) {
                     Text(widgetPinMessage!!, color = colors.textMuted, fontSize = 11.sp)
@@ -376,8 +442,110 @@ fun SettingsScreen(
                     }
                 }
             }
+
+            SettingsSection("アプリの更新") {
+                Text(
+                    "現在のバージョン v${BuildConfig.VERSION_NAME}",
+                    color = colors.textSecondary,
+                    fontSize = 12.sp,
+                )
+                when (val state = updateState) {
+                    UpdateUiState.Idle -> Text(
+                        "GitHub Releases から最新版を確認できます。",
+                        color = colors.textMuted,
+                        fontSize = 11.sp,
+                    )
+
+                    UpdateUiState.Checking -> Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                        Text("GitHub Releases を確認中…", color = colors.textMuted, fontSize = 11.sp)
+                    }
+
+                    UpdateUiState.UpToDate -> Text(
+                        "最新版です。",
+                        color = colors.textMuted,
+                        fontSize = 11.sp,
+                    )
+
+                    is UpdateUiState.Available -> {
+                        Text(
+                            "v${state.update.versionName} が利用可能です",
+                            color = colors.textPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        if (state.update.notes.isNotBlank()) {
+                            Text(
+                                state.update.notes,
+                                color = colors.textMuted,
+                                fontSize = 11.sp,
+                                maxLines = 4,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        if (installPermissionMissing) {
+                            Text(
+                                "「不明なアプリのインストール」を許可してから、もう一度お試しください。",
+                                color = colors.paceRed,
+                                fontSize = 11.sp,
+                            )
+                        }
+                        OutlinedButton(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, colors.border),
+                            onClick = { downloadAndInstall(state.update) },
+                        ) {
+                            Icon(Icons.Outlined.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(5.dp))
+                            Text("ダウンロードしてインストール", fontSize = 12.sp)
+                        }
+                    }
+
+                    is UpdateUiState.Downloading -> {
+                        LinearProgressIndicator(
+                            progress = { state.progress },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            "APK をダウンロード中… ${(state.progress * 100).roundToInt()}%",
+                            color = colors.textMuted,
+                            fontSize = 11.sp,
+                        )
+                    }
+
+                    is UpdateUiState.Failed -> Text(
+                        state.message,
+                        color = colors.paceRed,
+                        fontSize = 11.sp,
+                    )
+                }
+                OutlinedButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, colors.border),
+                    enabled = updateState !is UpdateUiState.Checking && updateState !is UpdateUiState.Downloading,
+                    onClick = { checkForUpdates() },
+                ) {
+                    Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(5.dp))
+                    Text(if (updateState is UpdateUiState.Failed) "再試行" else "更新を確認", fontSize = 12.sp)
+                }
+            }
         }
     }
+}
+
+private sealed interface UpdateUiState {
+    data object Idle : UpdateUiState
+    data object Checking : UpdateUiState
+    data object UpToDate : UpdateUiState
+    data class Available(val update: AvailableUpdate) : UpdateUiState
+    data class Downloading(val progress: Float) : UpdateUiState
+    data class Failed(val message: String) : UpdateUiState
 }
 
 @Composable

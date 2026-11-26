@@ -10,6 +10,8 @@ Android companion app and home-screen widgets inspired by [PowerUserZ/OpenTokenU
 - **Jetpack Glance Home-Screen Widgets**:
   - Overview widget (multiple providers at a glance)
   - Single-provider widget (configurable per account)
+  - 1x3 status strip widget that mirrors the persistent notification layout
+- **In-app updates**: Checks GitHub Releases and downloads/installs the latest APK without leaving the app.
 - **Direct Provider Support**: Supports direct API key / OAuth / session credential entry and encrypted local storage via AndroidX Security Crypto (`EncryptedSharedPreferences`).
 - **Cursor X Subscription aware**: On the new Cursor X Subscription plans, only the shared weekly pool (`Total usage`) is shown; legacy plan, on-demand, and Grok Bot lines are hidden.
 - **Persistent notification**: Optional ongoing notification in the status bar with the latest usage per account, refreshed by the background schedule.

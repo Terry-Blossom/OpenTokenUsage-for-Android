@@ -10,6 +10,7 @@ import com.opentokenusage.android.data.repository.UsageRepository
 import com.opentokenusage.android.data.storage.AccountSecretsStore
 import com.opentokenusage.android.data.storage.LocalAppStores
 import com.opentokenusage.android.data.storage.RateLimitGateStore
+import com.opentokenusage.android.data.update.AppUpdater
 import com.opentokenusage.android.util.NotificationHelper
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
@@ -27,6 +28,7 @@ class AppContainer(application: Application) {
     val secretsStore by lazy { AccountSecretsStore(application, ProviderHttpSupport.json) }
     val gateStore by lazy { RateLimitGateStore(application, ProviderHttpSupport.json) }
     val notificationHelper by lazy { NotificationHelper(application) }
+    val appUpdater by lazy { AppUpdater(application, httpClient) }
     val antigravityOAuthSettings by lazy {
         AntigravityOAuthSettingsStore(
             secretsStore = secretsStore,

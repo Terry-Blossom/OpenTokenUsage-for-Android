@@ -6,5 +6,7 @@
     <string name="widget_overview_description">Displays real-time usage, pacing markers, and reset timers for your connected AI providers.</string>
     <string name="widget_single_label">AI Provider Compact</string>
     <string name="widget_single_description">Compact home-screen meter for a selected AI provider account.</string>
+    <string name="widget_status_strip_label">AI Usage Status Strip</string>
+    <string name="widget_status_strip_description">3x1 status strip with the same provider icons and usage percentages as the notification bar.</string>
     <string name="usage_provider_icon" translatable="false">プロバイダー</string>
 </resources>

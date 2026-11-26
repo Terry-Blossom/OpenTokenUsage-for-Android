@@ -26,6 +26,7 @@ import com.opentokenusage.android.domain.model.UsageHistoryEntry
 import com.opentokenusage.android.util.NotificationHelper
 import com.opentokenusage.android.widget.UsageOverviewWidget
 import com.opentokenusage.android.widget.UsageSingleWidget
+import com.opentokenusage.android.widget.UsageStatusStripWidget
 import com.opentokenusage.android.worker.UsageRefreshScheduler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -477,6 +478,7 @@ class UsageRepository(
     suspend fun updateWidgets() {
         runCatching { UsageOverviewWidget().updateAll(context.applicationContext) }
         runCatching { UsageSingleWidget().updateAll(context.applicationContext) }
+        runCatching { UsageStatusStripWidget().updateAll(context.applicationContext) }
         runCatching {
             notificationHelper.updatePersistentNotification(orderedDisplaySnapshots(), _settings.value)
         }

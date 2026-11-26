@@ -4,6 +4,7 @@ import com.opentokenusage.android.domain.model.MetricFormat
 import com.opentokenusage.android.domain.model.MetricLine
 import com.opentokenusage.android.domain.model.ProviderSnapshot
 import com.opentokenusage.android.util.statusNotificationLines
+import com.opentokenusage.android.util.usageStatusEntries
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -37,5 +38,28 @@ class NotificationStatusLinesTest {
         )
 
         assertEquals(listOf(line), statusNotificationLines(snapshot))
+    }
+
+    @Test
+    fun statusStripKeepsOneCellPerProviderAndCapsAtThree() {
+        fun snap(id: String, provider: String) = ProviderSnapshot(
+            accountId = id,
+            providerId = provider,
+            displayName = provider,
+            fetchedAtMs = 1L,
+            lines = listOf(MetricLine.Progress("Total usage", 25.0, 100.0, period = "weekly")),
+        )
+        val snapshots = listOf(
+            snap("a1", "claude"),
+            snap("a2", "claude"),
+            snap("a3", "codex"),
+            snap("a4", "cursor"),
+            snap("a5", "grok"),
+        )
+
+        assertEquals(
+            listOf("claude", "codex", "cursor"),
+            usageStatusEntries(snapshots).map { it.snapshot.providerId },
+        )
     }
 }

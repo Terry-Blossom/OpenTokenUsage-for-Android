@@ -201,6 +201,7 @@ class MainActivity : ComponentActivity() {
                             SettingsScreen(
                                 settings = settings,
                                 accounts = accounts,
+                                appUpdater = container.appUpdater,
                                 onUpdateSettings = { transform ->
                                     scope.launch { repo.updateSettings(transform) }
                                 },
