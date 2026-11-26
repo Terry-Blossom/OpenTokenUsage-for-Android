@@ -290,8 +290,8 @@ class CursorClient(
                     usage?.objOrNull("planUsage")?.let { pu ->
                         val limitCents = pu.doubleOrNull("limit")
                         val remainingCents = pu.doubleOrNull("remaining")
-                        val usedCents = pu.doubleOrNull("totalSpend")
-                            ?: pu.doubleOrNull("includedSpend")
+                        val usedCents = pu.doubleOrNull("includedSpend")
+                            ?: pu.doubleOrNull("totalSpend")
                             ?: if (limitCents != null && remainingCents != null) max(0.0, limitCents - remainingCents) else null
                         if (limitCents != null && limitCents > 0.0 && usedCents != null) {
                             lines += MetricLine.Progress(
@@ -318,6 +318,7 @@ class CursorClient(
                                 )
                             }
                         }
+                        appendPlanUsageDetails(lines, pu, cycleEnd, periodMs)
                     }
 
                     usage?.objOrNull("spendLimitUsage")?.let { su ->
@@ -376,23 +377,68 @@ class CursorClient(
                     planName = membershipLabel(membership)
                 }
                 val isXPlan = isXSubscriptionMembership(membership)
-                summary.objOrNull("individualUsage")?.objOrNull("plan")?.doubleOrNull("totalPercentUsed")?.let { pct ->
-                    lines += MetricLine.Progress(
-                        label = "Total usage",
-                        used = pct.coerceIn(0.0, 100.0),
-                        limit = 100.0,
-                        format = MetricFormat.Percent,
-                        resetsAtMs = ProviderHttpSupport.parseDateMs(summary["billingCycleEnd"]),
-                        periodDurationMs = if (isXPlan) WEEK_MS else 30L * 24L * 3600_000L,
-                        primaryOrder = 1,
-                        period = if (isXPlan) "weekly" else null,
-                    )
+                val summaryEndMs = ProviderHttpSupport.parseDateMs(summary["billingCycleEnd"])
+                val summaryPeriodMs = if (isXPlan) WEEK_MS else 30L * 24L * 3600_000L
+                summary.objOrNull("individualUsage")?.objOrNull("plan")?.let { planObj ->
+                    planObj.doubleOrNull("totalPercentUsed")?.let { pct ->
+                        lines += MetricLine.Progress(
+                            label = "Total usage",
+                            used = pct.coerceIn(0.0, 100.0),
+                            limit = 100.0,
+                            format = MetricFormat.Percent,
+                            resetsAtMs = summaryEndMs,
+                            periodDurationMs = summaryPeriodMs,
+                            primaryOrder = 1,
+                            period = if (isXPlan) "weekly" else null,
+                        )
+                    }
+                    if (!isXPlan) {
+                        appendPlanUsageDetails(lines, planObj, summaryEndMs, summaryPeriodMs)
+                    }
                 }
             }
         }
 
         if (lines.isEmpty()) throw ProviderProbeException("Cursor の利用状況が取得できませんでした")
         return ProbeResult(plan = planName, lines = lines, updatedSecret = updatedSecret)
+    }
+
+    private fun appendPlanUsageDetails(
+        lines: MutableList<MetricLine>,
+        planUsage: JsonObject,
+        resetsAtMs: Long?,
+        periodDurationMs: Long,
+    ) {
+        planUsage.doubleOrNull("apiPercentUsed")?.let { apiPct ->
+            lines += MetricLine.Progress(
+                label = "API usage",
+                used = apiPct.coerceIn(0.0, 100.0),
+                limit = 100.0,
+                format = MetricFormat.Percent,
+                resetsAtMs = resetsAtMs,
+                periodDurationMs = periodDurationMs,
+                scope = "detail",
+            )
+        }
+        val bonusSpendCents = planUsage.doubleOrNull("bonusSpend")?.takeIf { it > 0.0 }
+        val remainingBonus = planUsage.boolOrNull("remainingBonus")
+        if (bonusSpendCents != null || remainingBonus == true) {
+            val bonusText = when {
+                bonusSpendCents != null && remainingBonus == true ->
+                    String.format(Locale.US, "$%.2f 使用・残りあり", bonusSpendCents / 100.0)
+                bonusSpendCents != null && remainingBonus == false ->
+                    String.format(Locale.US, "$%.2f 使用済み（残りなし）", bonusSpendCents / 100.0)
+                bonusSpendCents != null ->
+                    String.format(Locale.US, "$%.2f 使用済み", bonusSpendCents / 100.0)
+                else -> "利用可能"
+            }
+            lines += MetricLine.Text(
+                label = "Bonus",
+                value = bonusText,
+                subtitle = planUsage.strOrNull("bonusTooltip"),
+                scope = "detail",
+            )
+        }
     }
 
     private suspend fun fetchUsageSummary(webBase: String, sessionHeader: String): HttpResponseData =

@@ -158,7 +158,8 @@ fun JsonObject.strOrNull(key: String): String? {
 fun JsonObject.doubleOrNull(key: String): Double? {
     val el = this[key] ?: return null
     val prim = el as? JsonPrimitive ?: return null
-    return prim.doubleOrNull ?: prim.contentOrNull?.trim()?.toDoubleOrNull()?.takeIf { it.isFinite() }
+    val num = prim.doubleOrNull ?: prim.contentOrNull?.trim()?.toDoubleOrNull() ?: return null
+    return num.takeIf { it.isFinite() }
 }
 
 fun JsonObject.longOrNull(key: String): Long? {
