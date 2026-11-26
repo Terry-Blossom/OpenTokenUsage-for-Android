@@ -15,8 +15,8 @@ android {
         applicationId = "com.opentokenusage.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 11
-        versionName = "0.2.0"
+        versionCode = 12
+        versionName = "0.2.1"
 
         val localProps = Properties().apply {
             val f = rootProject.file("local.properties")
