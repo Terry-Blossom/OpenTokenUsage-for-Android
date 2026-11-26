@@ -71,6 +71,7 @@ import com.opentokenusage.android.ui.components.FetchErrorBanner
 import com.opentokenusage.android.ui.components.ServiceOutageBadge
 import com.opentokenusage.android.ui.components.UsageProgressBar
 import com.opentokenusage.android.ui.components.UsageSparklineChart
+import com.opentokenusage.android.ui.components.parseLineColorOrNull
 import com.opentokenusage.android.ui.theme.LocalOtuColors
 import com.opentokenusage.android.ui.theme.ProviderVisuals
 import com.opentokenusage.android.widget.UsageSingleWidgetReceiver
@@ -362,7 +363,13 @@ fun ProviderDetailScreen(
                             ) {
                                 Text(line.label, color = colors.textSecondary, fontSize = 13.sp)
                                 Column(horizontalAlignment = Alignment.End) {
-                                    Text(line.value, style = tnum, color = colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        line.value,
+                                        style = tnum,
+                                        color = parseLineColorOrNull(line.colorHex) ?: colors.textPrimary,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
                                     if (!line.subtitle.isNullOrBlank()) {
                                         Text(line.subtitle, color = colors.textMuted, fontSize = 11.sp)
                                     }

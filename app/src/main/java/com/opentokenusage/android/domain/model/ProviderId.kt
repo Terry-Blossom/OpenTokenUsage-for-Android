@@ -163,6 +163,15 @@ enum class ProviderId(
         authMode = ProviderAuthMode.OAUTH_OR_JSON,
         keyHelpUrl = "https://kiro.dev",
         localFileHint = "~/.aws/sso/cache/kiro-auth-token.json (+ profileArn)",
+    ),
+    CUSTOM_BALANCE(
+        id = "custom-balance",
+        displayName = "Custom balances",
+        brandColorRgb = 0xFF0EA5E9,
+        authMode = ProviderAuthMode.API_KEY,
+        keyHelpUrl = "",
+        localFileHint = "New API / One API / Sub2API / 独自エンドポイントのベース URL と API キーを入力してください（複数アカウント登録可）。",
+        supportsCustomHost = true,
     );
 
     companion object {

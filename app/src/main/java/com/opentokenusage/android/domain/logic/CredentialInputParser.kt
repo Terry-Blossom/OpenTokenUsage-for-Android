@@ -91,6 +91,7 @@ object CredentialInputParser {
             ProviderId.OPENCODE_GO,
             ProviderId.AMP,
             ProviderId.DEVIN,
+            ProviderId.CUSTOM_BALANCE,
         )
 
         if (providerId == ProviderId.ANTIGRAVITY && raw.startsWith("1//")) {

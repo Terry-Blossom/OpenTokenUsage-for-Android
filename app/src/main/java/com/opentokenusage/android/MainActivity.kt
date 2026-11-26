@@ -149,11 +149,11 @@ class MainActivity : ComponentActivity() {
                                 onSaveAntigravityOAuthSettings = { id, secret ->
                                     container.antigravityOAuthSettings.save(id, secret)
                                 },
-                                onTestAndSaveNew = { pid, label, region, host, secret, verify ->
-                                    repo.addAccountAndProbe(pid, label, region, host, secret, verify)
+                                onTestAndSaveNew = { pid, label, region, host, secret, verify, customBalance ->
+                                    repo.addAccountAndProbe(pid, label, region, host, secret, verify, customBalance)
                                 },
-                                onUpdateExisting = { id, label, region, host, sec ->
-                                    repo.updateAccountCredentials(id, label, region, host, sec)
+                                onUpdateExisting = { id, label, region, host, sec, customBalance ->
+                                    repo.updateAccountCredentials(id, label, region, host, sec, customBalance)
                                 },
                                 onBack = { navController.popBackStack() },
                             )

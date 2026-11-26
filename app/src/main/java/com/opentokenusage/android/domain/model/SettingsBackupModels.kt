@@ -16,6 +16,7 @@ data class ExportedAccount(
     val customHost: String = "",
     val sortOrder: Int = 0,
     val alertThresholds: AccountAlertThresholds? = null,
+    val customBalance: CustomBalanceConfig? = null,
 )
 
 /**

@@ -491,6 +491,7 @@ fun ProviderCard(
                             }
 
                             is MetricLine.Text -> {
+                                val valueColor = parseLineColorOrNull(line.colorHex) ?: colors.textPrimary
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -505,7 +506,7 @@ fun ProviderCard(
                                         Text(
                                             text = line.value,
                                             style = tnumStyle,
-                                            color = colors.textPrimary,
+                                            color = valueColor,
                                             fontSize = 13.sp,
                                             fontWeight = FontWeight.SemiBold,
                                         )
@@ -580,4 +581,9 @@ fun ProviderCard(
             }
         }
     }
+}
+
+internal fun parseLineColorOrNull(colorHex: String?): Color? {
+    val trimmed = colorHex?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    return runCatching { Color(android.graphics.Color.parseColor(trimmed)) }.getOrNull()
 }

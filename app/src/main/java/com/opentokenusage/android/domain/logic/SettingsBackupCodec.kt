@@ -3,6 +3,7 @@ package com.opentokenusage.android.domain.logic
 import com.opentokenusage.android.domain.model.AccountAlertThresholds
 import com.opentokenusage.android.domain.model.AppSettings
 import com.opentokenusage.android.domain.model.ConfiguredAccount
+import com.opentokenusage.android.domain.model.CustomBalanceConfig
 import com.opentokenusage.android.domain.model.ExportedAccount
 import com.opentokenusage.android.domain.model.SettingsBackupImportSummary
 import com.opentokenusage.android.domain.model.SettingsBackupPayload
@@ -59,6 +60,7 @@ object SettingsBackupCodec {
                 customHost = acc.customHost.trim(),
                 sortOrder = idx,
                 alertThresholds = cleanThresholdMap[acc.id],
+                customBalance = sanitizeCustomBalance(acc.customBalance),
             )
         }
         val payload = SettingsBackupPayload(
@@ -109,6 +111,7 @@ object SettingsBackupCodec {
                         label = acc.label.trim(),
                         customHost = acc.customHost.trim(),
                         alertThresholds = sanitizeThresholds(acc.alertThresholds),
+                        customBalance = sanitizeCustomBalance(acc.customBalance),
                     )
                 }
             }
@@ -153,6 +156,7 @@ object SettingsBackupCodec {
                     enabled = exported.enabled,
                     region = exported.region,
                     customHost = exported.customHost,
+                    customBalance = exported.customBalance,
                 )
                 updatedCount++
             } else {
@@ -166,6 +170,7 @@ object SettingsBackupCodec {
                     customHost = exported.customHost,
                     sortOrder = 0,
                     createdAtMs = nowMs,
+                    customBalance = exported.customBalance,
                 )
                 addedCount++
             }
@@ -219,6 +224,21 @@ object SettingsBackupCodec {
             it.providerId.equals(exported.providerId, ignoreCase = true) &&
                 it.label.trim() == exported.label.trim()
         }
+    }
+
+    private fun sanitizeCustomBalance(config: CustomBalanceConfig?): CustomBalanceConfig? {
+        if (config == null) return null
+        return CustomBalanceConfig(
+            preset = config.preset,
+            userId = config.userId.trim(),
+            path = config.path.trim(),
+            authHeader = config.authHeader,
+            remainingPath = config.remainingPath.trim(),
+            usedPath = config.usedPath.trim(),
+            totalPath = config.totalPath.trim(),
+            divisor = config.divisor.takeIf { it.isFinite() && it > 0.0 } ?: 1.0,
+            currency = config.currency.trim().uppercase(Locale.ROOT).ifEmpty { "USD" },
+        )
     }
 
     private fun sanitizeThresholds(thresholds: AccountAlertThresholds?): AccountAlertThresholds? {

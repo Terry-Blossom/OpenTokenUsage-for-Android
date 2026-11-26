@@ -20,6 +20,7 @@ import com.opentokenusage.android.domain.logic.UsageDisplayFormatter
 import com.opentokenusage.android.domain.model.AccountSecret
 import com.opentokenusage.android.domain.model.AppSettings
 import com.opentokenusage.android.domain.model.ConfiguredAccount
+import com.opentokenusage.android.domain.model.CustomBalanceConfig
 import com.opentokenusage.android.domain.model.MetricLine
 import com.opentokenusage.android.domain.model.MiniMaxRegion
 import com.opentokenusage.android.domain.model.ProviderId
@@ -147,6 +148,7 @@ class UsageRepository(
         region: MiniMaxRegion,
         customHost: String,
         secret: AccountSecret,
+        customBalance: CustomBalanceConfig? = null,
     ): ProviderSnapshot {
         val tempAccount = ConfiguredAccount(
             id = "test_${UUID.randomUUID()}",
@@ -155,6 +157,7 @@ class UsageRepository(
             enabled = true,
             region = region,
             customHost = customHost.trim(),
+            customBalance = customBalance,
         )
         val now = System.currentTimeMillis()
         val result = clientRegistry.clientFor(providerId.id).probe(tempAccount, secret, now)
@@ -177,6 +180,7 @@ class UsageRepository(
         customHost: String,
         secret: AccountSecret,
         verifyFirst: Boolean = true,
+        customBalance: CustomBalanceConfig? = null,
     ): Result<ConfiguredAccount> {
         initialize()
         val newAccount = ConfiguredAccount(
@@ -188,6 +192,7 @@ class UsageRepository(
             customHost = customHost.trim(),
             sortOrder = (_accounts.value.maxOfOrNull { it.sortOrder } ?: -1) + 1,
             createdAtMs = System.currentTimeMillis(),
+            customBalance = customBalance,
         )
 
         val now = System.currentTimeMillis()
@@ -225,11 +230,17 @@ class UsageRepository(
         region: MiniMaxRegion,
         customHost: String,
         newSecret: AccountSecret?,
+        customBalance: CustomBalanceConfig? = null,
     ) {
         initialize()
         val list = _accounts.value.map {
             if (it.id == accountId) {
-                it.copy(label = label.trim(), region = region, customHost = customHost.trim())
+                it.copy(
+                    label = label.trim(),
+                    region = region,
+                    customHost = customHost.trim(),
+                    customBalance = customBalance,
+                )
             } else {
                 it
             }

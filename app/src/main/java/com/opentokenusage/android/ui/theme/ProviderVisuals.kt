@@ -14,6 +14,7 @@ object ProviderVisuals {
         "codex" -> R.drawable.ic_provider_codex
         "copilot" -> R.drawable.ic_provider_copilot
         "cursor" -> R.drawable.ic_provider_cursor
+        "custom-balance" -> R.drawable.ic_provider_custom_balance
         "deepseek" -> R.drawable.ic_provider_deepseek
         "devin" -> R.drawable.ic_provider_devin
         "factory" -> R.drawable.ic_provider_factory

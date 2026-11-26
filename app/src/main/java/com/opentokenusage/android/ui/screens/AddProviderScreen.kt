@@ -65,6 +65,9 @@ import com.opentokenusage.android.data.auth.AntigravityOAuthUiState
 import com.opentokenusage.android.domain.logic.CredentialInputParser
 import com.opentokenusage.android.domain.model.AccountSecret
 import com.opentokenusage.android.domain.model.ConfiguredAccount
+import com.opentokenusage.android.domain.model.CustomBalanceAuthHeader
+import com.opentokenusage.android.domain.model.CustomBalanceConfig
+import com.opentokenusage.android.domain.model.CustomBalancePreset
 import com.opentokenusage.android.domain.model.MiniMaxRegion
 import com.opentokenusage.android.domain.model.ProviderAuthMode
 import com.opentokenusage.android.domain.model.ProviderId
@@ -81,8 +84,8 @@ fun AddProviderScreen(
     antigravityOAuth: AntigravityOAuthCoordinator? = null,
     antigravityOAuthSettings: AntigravityOAuthClientSettings = AntigravityOAuthClientSettings(),
     onSaveAntigravityOAuthSettings: suspend (String, String) -> Unit = { _, _ -> },
-    onTestAndSaveNew: suspend (ProviderId, String, MiniMaxRegion, String, AccountSecret, Boolean) -> Result<ConfiguredAccount>,
-    onUpdateExisting: suspend (String, String, MiniMaxRegion, String, AccountSecret?) -> Unit,
+    onTestAndSaveNew: suspend (ProviderId, String, MiniMaxRegion, String, AccountSecret, Boolean, CustomBalanceConfig?) -> Result<ConfiguredAccount>,
+    onUpdateExisting: suspend (String, String, MiniMaxRegion, String, AccountSecret?, CustomBalanceConfig?) -> Unit,
     onBack: () -> Unit,
 ) {
     val colors = LocalOtuColors.current
@@ -154,6 +157,7 @@ fun AddProviderScreen(
                                     Text(p.displayName, color = colors.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                                     val sub = when {
                                         p == ProviderId.ANTIGRAVITY -> "Google ログイン / OAuth トークン"
+                                        p == ProviderId.CUSTOM_BALANCE -> "ベース URL・API キー（New API / Sub2API / 独自・複数登録可）"
                                         p == ProviderId.CURSOR || p == ProviderId.GROK -> "crsr_ APIキー / トークン"
                                         p.authMode == ProviderAuthMode.API_KEY -> "APIキーで接続"
                                         p.authMode == ProviderAuthMode.OAUTH_OR_JSON -> "OAuthトークン / 認証JSON"
@@ -196,8 +200,8 @@ private fun ProviderCredentialForm(
     antigravityOAuthSettings: AntigravityOAuthClientSettings,
     onSaveAntigravityOAuthSettings: suspend (String, String) -> Unit,
     onBack: () -> Unit,
-    onSave: suspend (ProviderId, String, MiniMaxRegion, String, AccountSecret, Boolean) -> Result<ConfiguredAccount>,
-    onUpdate: suspend (String, String, MiniMaxRegion, String, AccountSecret?) -> Unit,
+    onSave: suspend (ProviderId, String, MiniMaxRegion, String, AccountSecret, Boolean, CustomBalanceConfig?) -> Result<ConfiguredAccount>,
+    onUpdate: suspend (String, String, MiniMaxRegion, String, AccountSecret?, CustomBalanceConfig?) -> Unit,
 ) {
     val colors = LocalOtuColors.current
     val clipboard = LocalClipboardManager.current
@@ -227,6 +231,20 @@ private fun ProviderCredentialForm(
         )
     }
     var region by remember(editingAccount) { mutableStateOf(editingAccount?.region ?: MiniMaxRegion.GLOBAL) }
+    val initialCustom = editingAccount?.customBalance
+    var customPreset by remember(editingAccount) { mutableStateOf(initialCustom?.preset ?: CustomBalancePreset.NEW_API) }
+    var customUserId by remember(editingAccount) { mutableStateOf(initialCustom?.userId.orEmpty()) }
+    var customPath by remember(editingAccount) { mutableStateOf(initialCustom?.path.orEmpty()) }
+    var customAuthHeader by remember(editingAccount) { mutableStateOf(initialCustom?.authHeader ?: CustomBalanceAuthHeader.BEARER) }
+    var customRemainingPath by remember(editingAccount) { mutableStateOf(initialCustom?.remainingPath.orEmpty()) }
+    var customUsedPath by remember(editingAccount) { mutableStateOf(initialCustom?.usedPath.orEmpty()) }
+    var customTotalPath by remember(editingAccount) { mutableStateOf(initialCustom?.totalPath.orEmpty()) }
+    var customDivisor by remember(editingAccount) {
+        mutableStateOf(
+            initialCustom?.divisor?.let { d -> if (d % 1.0 == 0.0) d.toLong().toString() else d.toString() } ?: "1",
+        )
+    }
+    var customCurrency by remember(editingAccount) { mutableStateOf(initialCustom?.currency?.ifBlank { "USD" } ?: "USD") }
     var detectedHint by remember { mutableStateOf<String?>(null) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var isSubmitting by remember { mutableStateOf(false) }
@@ -263,7 +281,7 @@ private fun ProviderCredentialForm(
                 isSubmitting = true
                 try {
                     if (editingAccount == null) {
-                        val res = onSave(provider, effectiveAlias, region, customHost.trim(), st.secret, true)
+                        val res = onSave(provider, effectiveAlias, region, customHost.trim(), st.secret, true, null)
                         antigravityOAuth.reset()
                         if (res.isSuccess) {
                             onBack()
@@ -272,7 +290,7 @@ private fun ProviderCredentialForm(
                             errorMsg = res.exceptionOrNull()?.message ?: "接続テストに失敗しました"
                         }
                     } else {
-                        onUpdate(editingAccount.id, effectiveAlias, region, customHost.trim(), st.secret)
+                        onUpdate(editingAccount.id, effectiveAlias, region, customHost.trim(), st.secret, null)
                         antigravityOAuth.reset()
                         onBack()
                     }
@@ -444,19 +462,123 @@ private fun ProviderCredentialForm(
                 }
             }
 
+            if (provider == ProviderId.CUSTOM_BALANCE) {
+                Text("プリセット", color = colors.textSecondary, fontSize = 12.sp)
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    CustomBalancePreset.entries.chunked(2).forEach { rowPresets ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            rowPresets.forEach { preset ->
+                                FilterChip(
+                                    selected = customPreset == preset,
+                                    onClick = { customPreset = preset },
+                                    label = { Text(preset.label, fontSize = 11.sp) },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             if (provider.supportsCustomHost) {
                 OutlinedTextField(
                     value = customHost,
                     onValueChange = { customHost = it },
                     label = {
-                        Text("ホスト名")
+                        Text(
+                            when (provider) {
+                                ProviderId.CUSTOM_BALANCE -> "ベース URL（例: https://api.example.com）"
+                                else -> "ホスト名"
+                            },
+                        )
                     },
                     placeholder = {
-                        Text("github.com")
+                        Text(
+                            when (provider) {
+                                ProviderId.CUSTOM_BALANCE -> "https://relay.example.com（末尾 /v1 は自動除去）"
+                                else -> "github.com"
+                            },
+                        )
                     },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+            }
+
+            if (provider == ProviderId.CUSTOM_BALANCE && customPreset == CustomBalancePreset.NEW_API) {
+                OutlinedTextField(
+                    value = customUserId,
+                    onValueChange = { customUserId = it },
+                    label = { Text("New-Api-User（数値ユーザーID・任意）") },
+                    placeholder = { Text("例: 1") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            if (provider == ProviderId.CUSTOM_BALANCE && customPreset == CustomBalancePreset.CUSTOM) {
+                OutlinedTextField(
+                    value = customPath,
+                    onValueChange = { customPath = it },
+                    label = { Text("エンドポイントパス") },
+                    placeholder = { Text("例: /api/v1/balance") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text("認証ヘッダー", color = colors.textSecondary, fontSize = 12.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CustomBalanceAuthHeader.entries.forEach { header ->
+                        FilterChip(
+                            selected = customAuthHeader == header,
+                            onClick = { customAuthHeader = header },
+                            label = { Text(header.label, fontSize = 11.sp) },
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = customRemainingPath,
+                    onValueChange = { customRemainingPath = it },
+                    label = { Text("残高のドットパス（必須）") },
+                    placeholder = { Text("例: data.balance") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = customUsedPath,
+                    onValueChange = { customUsedPath = it },
+                    label = { Text("使用量のドットパス（任意）") },
+                    placeholder = { Text("例: data.used") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = customTotalPath,
+                    onValueChange = { customTotalPath = it },
+                    label = { Text("合計枠のドットパス（任意）") },
+                    placeholder = { Text("例: data.total") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedTextField(
+                        value = customDivisor,
+                        onValueChange = { customDivisor = it },
+                        label = { Text("除数") },
+                        placeholder = { Text("1") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedTextField(
+                        value = customCurrency,
+                        onValueChange = { customCurrency = it },
+                        label = { Text("通貨") },
+                        placeholder = { Text("USD") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
 
             if (provider.supportsRegion) {
@@ -583,11 +705,39 @@ private fun ProviderCredentialForm(
                         scope.launch {
                             errorMsg = null
                             val trimmedHost = customHost.trim()
+                            if (provider == ProviderId.CUSTOM_BALANCE) {
+                                if (!trimmedHost.startsWith("http://", ignoreCase = true) &&
+                                    !trimmedHost.startsWith("https://", ignoreCase = true)
+                                ) {
+                                    errorMsg = "ベース URL を http:// または https:// から入力してください"
+                                    return@launch
+                                }
+                                if (customPreset == CustomBalancePreset.CUSTOM && customRemainingPath.isBlank()) {
+                                    errorMsg = "独自エンドポイントでは残高のドットパスを入力してください"
+                                    return@launch
+                                }
+                            }
                             if (primaryInput.isBlank() &&
                                 refreshTokenInput.isBlank()
                             ) {
                                 errorMsg = "APIキーまたは認証トークンを入力してください"
                                 return@launch
+                            }
+
+                            val customConfig = if (provider == ProviderId.CUSTOM_BALANCE) {
+                                CustomBalanceConfig(
+                                    preset = customPreset,
+                                    userId = customUserId.trim(),
+                                    path = customPath.trim(),
+                                    authHeader = customAuthHeader,
+                                    remainingPath = customRemainingPath.trim(),
+                                    usedPath = customUsedPath.trim(),
+                                    totalPath = customTotalPath.trim(),
+                                    divisor = customDivisor.trim().toDoubleOrNull()?.takeIf { it.isFinite() && it > 0.0 } ?: 1.0,
+                                    currency = customCurrency.trim().uppercase().ifEmpty { "USD" },
+                                )
+                            } else {
+                                null
                             }
 
                             isSubmitting = true
@@ -600,14 +750,14 @@ private fun ProviderCredentialForm(
                                     awsRegion = awsRegion,
                                 )
                                 if (editingAccount == null) {
-                                    val res = onSave(provider, alias, region, trimmedHost, parsed.secret, true)
+                                    val res = onSave(provider, alias, region, trimmedHost, parsed.secret, true, customConfig)
                                     if (res.isSuccess) {
                                         onBack()
                                     } else {
                                         errorMsg = res.exceptionOrNull()?.message ?: "接続テストに失敗しました"
                                     }
                                 } else {
-                                    onUpdate(editingAccount.id, alias, region, trimmedHost, parsed.secret)
+                                    onUpdate(editingAccount.id, alias, region, trimmedHost, parsed.secret, customConfig)
                                     onBack()
                                 }
                             } finally {
