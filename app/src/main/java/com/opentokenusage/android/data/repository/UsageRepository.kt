@@ -15,6 +15,7 @@ import com.opentokenusage.android.data.storage.FxRateCache
 import com.opentokenusage.android.data.storage.GateDecision
 import com.opentokenusage.android.data.storage.LocalAppStores
 import com.opentokenusage.android.data.storage.RateLimitGateStore
+import com.opentokenusage.android.domain.logic.SettingsBackupCodec
 import com.opentokenusage.android.domain.logic.UsageDisplayFormatter
 import com.opentokenusage.android.domain.model.AccountSecret
 import com.opentokenusage.android.domain.model.AppSettings
@@ -24,6 +25,7 @@ import com.opentokenusage.android.domain.model.MiniMaxRegion
 import com.opentokenusage.android.domain.model.ProviderId
 import com.opentokenusage.android.domain.model.ProviderServiceStatus
 import com.opentokenusage.android.domain.model.ProviderSnapshot
+import com.opentokenusage.android.domain.model.SettingsBackupImportSummary
 import com.opentokenusage.android.domain.model.UsageHistoryEntry
 import com.opentokenusage.android.tile.UsageQuickSettingsTileService
 import com.opentokenusage.android.util.NotificationHelper
@@ -297,6 +299,37 @@ class UsageRepository(
         stores.saveSettings(updated)
         UsageRefreshScheduler.syncSchedule(context, updated, hasAccounts = _accounts.value.isNotEmpty())
         updateWidgets()
+    }
+
+    /** Exports AppSettings and non-secret account metadata as versioned JSON (no credentials). */
+    suspend fun exportSettingsBackupJson(): String {
+        initialize()
+        return SettingsBackupCodec.exportJson(
+            settings = _settings.value,
+            accounts = _accounts.value,
+        )
+    }
+
+    /** Imports AppSettings and non-secret account metadata from versioned JSON without touching secrets. */
+    suspend fun importSettingsBackupJson(rawJson: String): Result<SettingsBackupImportSummary> {
+        initialize()
+        val payload = SettingsBackupCodec.importJson(rawJson).getOrElse { return Result.failure(it) }
+        val merged = SettingsBackupCodec.mergeBackup(
+            currentAccounts = _accounts.value,
+            currentSettings = _settings.value,
+            backup = payload,
+        )
+        _accounts.value = merged.accounts
+        _settings.value = merged.settings
+        stores.saveAccounts(merged.accounts)
+        stores.saveSettings(merged.settings)
+        UsageRefreshScheduler.syncSchedule(
+            context = context,
+            settings = merged.settings,
+            hasAccounts = merged.accounts.isNotEmpty(),
+        )
+        updateWidgets()
+        return Result.success(merged.summary)
     }
 
     suspend fun getSecret(accountId: String): AccountSecret? = secretsStore.getSecret(accountId)

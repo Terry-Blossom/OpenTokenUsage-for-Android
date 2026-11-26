@@ -30,6 +30,7 @@ import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Upload
 import androidx.compose.material.icons.outlined.Widgets
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -73,6 +74,7 @@ import com.opentokenusage.android.domain.model.ConfiguredAccount
 import com.opentokenusage.android.domain.model.ProviderId
 import com.opentokenusage.android.domain.model.RefreshIntervalOption
 import com.opentokenusage.android.domain.model.ResetTimerMode
+import com.opentokenusage.android.domain.model.SettingsBackupImportSummary
 import com.opentokenusage.android.domain.model.UsageDisplayMode
 import com.opentokenusage.android.ui.theme.LocalOtuColors
 import com.opentokenusage.android.ui.theme.ProviderVisuals
@@ -80,7 +82,9 @@ import com.opentokenusage.android.widget.UsageMiniWidgetReceiver
 import com.opentokenusage.android.widget.UsageOverviewWidgetReceiver
 import com.opentokenusage.android.widget.UsageSingleWidgetReceiver
 import com.opentokenusage.android.widget.UsageStatusStripWidgetReceiver
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -94,6 +98,8 @@ fun SettingsScreen(
     onMoveAccount: (String, Int) -> Unit,
     onDeleteAccount: (String) -> Unit,
     onEditAccount: (String) -> Unit,
+    onExportSettingsJson: suspend () -> String,
+    onImportSettingsJson: suspend (String) -> Result<SettingsBackupImportSummary>,
     onBack: () -> Unit,
 ) {
     val colors = LocalOtuColors.current
@@ -128,6 +134,69 @@ fun SettingsScreen(
     var updateState by remember { mutableStateOf<UpdateUiState>(UpdateUiState.Idle) }
     var installPermissionMissing by remember { mutableStateOf(false) }
     val updaterScope = rememberCoroutineScope()
+
+    var backupBusy by remember { mutableStateOf(false) }
+    var backupMessage by remember { mutableStateOf<String?>(null) }
+    var backupIsError by remember { mutableStateOf(false) }
+
+    val exportDocumentLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        backupBusy = true
+        backupMessage = null
+        backupIsError = false
+        updaterScope.launch {
+            runCatching {
+                val jsonText = onExportSettingsJson()
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri, "wt")?.use { out ->
+                        out.write(jsonText.toByteArray(Charsets.UTF_8))
+                        out.flush()
+                    } ?: error("保存先ファイルを開けませんでした")
+                }
+            }.onSuccess {
+                backupIsError = false
+                backupMessage = "設定をエクスポートしました（認証情報は含まれていません）。"
+            }.onFailure { err ->
+                backupIsError = true
+                backupMessage = "エクスポートに失敗しました: ${err.message ?: "書き込みエラー"}"
+            }
+            backupBusy = false
+        }
+    }
+
+    val importDocumentLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        backupBusy = true
+        backupMessage = null
+        backupIsError = false
+        updaterScope.launch {
+            runCatching {
+                val rawText = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                        ?: error("ファイルを開けませんでした")
+                }
+                onImportSettingsJson(rawText).getOrThrow()
+            }.onSuccess { summary ->
+                backupIsError = false
+                val accountNote = when {
+                    summary.addedAccountCount > 0 ->
+                        "（アカウント追加 ${summary.addedAccountCount} 件・更新 ${summary.updatedAccountCount} 件。追加分は認証情報を再設定してください）"
+                    summary.updatedAccountCount > 0 ->
+                        "（アカウント更新 ${summary.updatedAccountCount} 件）"
+                    else -> ""
+                }
+                backupMessage = "設定をインポートしました$accountNote"
+            }.onFailure { err ->
+                backupIsError = true
+                backupMessage = err.message ?: "インポートに失敗しました"
+            }
+            backupBusy = false
+        }
+    }
 
     fun checkForUpdates() {
         if (updateState is UpdateUiState.Checking || updateState is UpdateUiState.Downloading) return
@@ -479,6 +548,50 @@ fun SettingsScreen(
                             }
                         }
                     }
+                }
+            }
+
+            SettingsSection("設定のバックアップ") {
+                Text(
+                    text = "アプリ設定とアカウント一覧（プロバイダー・表示名・有効/並び順・個別しきい値など）を JSON ファイルで保存・復元します。APIキー・トークン・Cookie・OAuth クライアント情報などの認証情報は含まれません。",
+                    color = colors.textSecondary,
+                    fontSize = 12.sp,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, colors.border),
+                        enabled = !backupBusy,
+                        onClick = { exportDocumentLauncher.launch("opentokenusage-settings.json") },
+                    ) {
+                        Icon(Icons.Outlined.Upload, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(5.dp))
+                        Text("エクスポート", fontSize = 12.sp)
+                    }
+                    OutlinedButton(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, colors.border),
+                        enabled = !backupBusy,
+                        onClick = {
+                            importDocumentLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+                        },
+                    ) {
+                        Icon(Icons.Outlined.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(5.dp))
+                        Text("インポート", fontSize = 12.sp)
+                    }
+                }
+                if (backupMessage != null) {
+                    Text(
+                        text = backupMessage!!,
+                        color = if (backupIsError) colors.paceRed else colors.textMuted,
+                        fontSize = 11.sp,
+                    )
                 }
             }
 

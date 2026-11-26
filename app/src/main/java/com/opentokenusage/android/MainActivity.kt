@@ -225,6 +225,8 @@ class MainActivity : ComponentActivity() {
                                 onEditAccount = { id ->
                                     navController.navigate("add?editAccountId=$id")
                                 },
+                                onExportSettingsJson = { repo.exportSettingsBackupJson() },
+                                onImportSettingsJson = { raw -> repo.importSettingsBackupJson(raw) },
                                 onBack = { navController.popBackStack() },
                             )
                         }
