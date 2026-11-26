@@ -5,6 +5,7 @@ import com.opentokenusage.android.data.auth.AntigravityOAuthClient
 import com.opentokenusage.android.data.auth.AntigravityOAuthCoordinator
 import com.opentokenusage.android.data.auth.AntigravityOAuthSettingsStore
 import com.opentokenusage.android.data.network.ProviderHttpSupport
+import com.opentokenusage.android.data.network.ProviderStatusClient
 import com.opentokenusage.android.data.network.clients.ProviderClientRegistry
 import com.opentokenusage.android.data.repository.UsageRepository
 import com.opentokenusage.android.data.storage.AccountSecretsStore
@@ -53,6 +54,8 @@ class AppContainer(application: Application) {
     }
     val antigravityOAuthCoordinator by lazy { AntigravityOAuthCoordinator(application, antigravityOAuthClient) }
 
+    val providerStatusClient by lazy { ProviderStatusClient(httpClient) }
+
     val repository by lazy {
         UsageRepository(
             context = application,
@@ -63,6 +66,7 @@ class AppContainer(application: Application) {
             gateStore = gateStore,
             clientRegistry = clientRegistry,
             notificationHelper = notificationHelper,
+            statusClient = providerStatusClient,
         )
     }
 }

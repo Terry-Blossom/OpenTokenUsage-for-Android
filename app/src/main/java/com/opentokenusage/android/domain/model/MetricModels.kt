@@ -132,7 +132,10 @@ data class ProviderSnapshot(
     val lines: List<MetricLine> = emptyList(),
     val fetchedAtMs: Long,
     val errorMessage: String? = null,
+    val errorIsAuth: Boolean = false,
+    val errorStatusCode: Int? = null,
     val isStale: Boolean = false,
+    val serviceStatus: ProviderServiceStatus? = null,
 ) {
     fun overviewLines(): List<MetricLine> =
         lines.filter { it.scope != "detail" }

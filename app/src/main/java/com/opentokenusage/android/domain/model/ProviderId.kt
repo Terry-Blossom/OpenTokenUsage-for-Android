@@ -17,6 +17,7 @@ enum class ProviderId(
     val localFileHint: String = "",
     val supportsRegion: Boolean = false,
     val supportsCustomHost: Boolean = false,
+    val statusPageUrl: String? = null,
 ) {
     CLAUDE(
         id = "claude",
@@ -25,6 +26,7 @@ enum class ProviderId(
         authMode = ProviderAuthMode.OAUTH_OR_JSON,
         keyHelpUrl = "https://claude.ai",
         localFileHint = "~/.claude/.credentials.json",
+        statusPageUrl = "https://status.claude.com",
     ),
     CODEX(
         id = "codex",
@@ -33,6 +35,7 @@ enum class ProviderId(
         authMode = ProviderAuthMode.OAUTH_OR_JSON,
         keyHelpUrl = "https://chatgpt.com/codex",
         localFileHint = "~/.codex/auth.json",
+        statusPageUrl = "https://status.openai.com",
     ),
     CURSOR(
         id = "cursor",
@@ -41,6 +44,7 @@ enum class ProviderId(
         authMode = ProviderAuthMode.SESSION_OR_OAUTH,
         keyHelpUrl = "https://cursor.com/settings",
         localFileHint = "Cursor API Key (crsr_...)、cursorAuth/accessToken、または WorkosCursorSessionToken Cookie",
+        statusPageUrl = "https://status.cursor.com",
     ),
     COPILOT(
         id = "copilot",
@@ -50,6 +54,7 @@ enum class ProviderId(
         keyHelpUrl = "https://github.com/settings/tokens",
         localFileHint = "`gh auth token` または GitHub PAT (copilot/read:user)",
         supportsCustomHost = true,
+        statusPageUrl = "https://www.githubstatus.com",
     ),
     ANTIGRAVITY(
         id = "antigravity",
@@ -72,6 +77,7 @@ enum class ProviderId(
         brandColorRgb = 0xFF4D6BFE,
         authMode = ProviderAuthMode.API_KEY,
         keyHelpUrl = "https://platform.deepseek.com/api_keys",
+        statusPageUrl = "https://status.deepseek.com",
     ),
     ZAI(
         id = "zai",
@@ -124,6 +130,7 @@ enum class ProviderId(
         authMode = ProviderAuthMode.OAUTH_OR_JSON,
         keyHelpUrl = "https://accounts.x.ai",
         localFileHint = "~/.grok/auth.json または Cursor API Key (crsr_...)",
+        statusPageUrl = "https://status.x.ai",
     ),
     MUSE(
         id = "muse",

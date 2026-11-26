@@ -40,9 +40,11 @@ import androidx.compose.ui.unit.sp
 import com.opentokenusage.android.domain.logic.PaceCalculator
 import com.opentokenusage.android.domain.logic.UsageDisplayFormatter
 import com.opentokenusage.android.domain.model.AppSettings
+import com.opentokenusage.android.domain.model.FetchFailureCause
 import com.opentokenusage.android.domain.model.MetricLine
 import com.opentokenusage.android.domain.model.ProviderSnapshot
 import com.opentokenusage.android.domain.model.UsageDisplayMode
+import com.opentokenusage.android.domain.model.diagnoseFetchFailure
 import com.opentokenusage.android.ui.theme.LocalOtuColors
 import com.opentokenusage.android.ui.theme.ProviderVisuals
 
@@ -155,6 +157,99 @@ fun UsageSparklineChart(
 }
 
 @Composable
+fun ServiceOutageBadge(
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalOtuColors.current
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(colors.warningBg)
+            .border(1.dp, colors.warningBorder, RoundedCornerShape(4.dp))
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.WarningAmber,
+            contentDescription = null,
+            tint = colors.paceRed,
+            modifier = Modifier.size(11.dp),
+        )
+        Text(
+            text = "障害発生中",
+            color = colors.paceRed,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+fun FetchErrorBanner(
+    snapshot: ProviderSnapshot,
+    modifier: Modifier = Modifier,
+) {
+    val errorMessage = snapshot.errorMessage?.takeIf { it.isNotBlank() } ?: return
+    val colors = LocalOtuColors.current
+    val diagnosis = diagnoseFetchFailure(
+        errorMessage = errorMessage,
+        serviceStatus = snapshot.serviceStatus,
+        isAuthError = snapshot.errorIsAuth,
+        statusCode = snapshot.errorStatusCode,
+    )
+    val accentColor = when (diagnosis?.cause) {
+        FetchFailureCause.SERVICE_OUTAGE -> colors.paceYellow
+        else -> colors.paceRed
+    }
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(7.dp))
+            .background(colors.warningBg)
+            .border(1.dp, colors.warningBorder, RoundedCornerShape(7.dp))
+            .padding(horizontal = 10.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.WarningAmber,
+            contentDescription = null,
+            tint = accentColor,
+            modifier = Modifier
+                .padding(top = 1.dp)
+                .size(15.dp),
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            if (diagnosis != null) {
+                Text(
+                    text = diagnosis.summaryJa,
+                    color = accentColor,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    lineHeight = 15.sp,
+                )
+                if (!diagnosis.serviceDescription.isNullOrBlank()) {
+                    Text(
+                        text = diagnosis.serviceDescription,
+                        color = colors.textSecondary,
+                        fontSize = 10.sp,
+                        lineHeight = 14.sp,
+                    )
+                }
+            }
+            Text(
+                text = if (snapshot.isStale) "前回のデータ表示中: $errorMessage" else errorMessage,
+                color = colors.textPrimary,
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+            )
+        }
+    }
+}
+
+@Composable
 fun ProviderCard(
     snapshot: ProviderSnapshot,
     settings: AppSettings,
@@ -246,6 +341,12 @@ fun ProviderCard(
                     }
                 }
 
+                if (snapshot.serviceStatus?.isOutage == true) {
+                    Spacer(Modifier.width(6.dp))
+                    ServiceOutageBadge()
+                    Spacer(Modifier.width(4.dp))
+                }
+
                 Icon(
                     imageVector = Icons.Outlined.ChevronRight,
                     contentDescription = "詳細",
@@ -256,29 +357,7 @@ fun ProviderCard(
 
             // Error / Stale Banner
             if (!snapshot.errorMessage.isNullOrBlank()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(7.dp))
-                        .background(colors.warningBg)
-                        .border(1.dp, colors.warningBorder, RoundedCornerShape(7.dp))
-                        .padding(horizontal = 10.dp, vertical = 7.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.WarningAmber,
-                        contentDescription = null,
-                        tint = colors.paceRed,
-                        modifier = Modifier.size(15.dp),
-                    )
-                    Text(
-                        text = if (snapshot.isStale) "前回のデータ表示中: ${snapshot.errorMessage}" else snapshot.errorMessage,
-                        color = colors.textPrimary,
-                        fontSize = 11.sp,
-                        lineHeight = 15.sp,
-                    )
-                }
+                FetchErrorBanner(snapshot = snapshot)
             }
 
             // Metrics

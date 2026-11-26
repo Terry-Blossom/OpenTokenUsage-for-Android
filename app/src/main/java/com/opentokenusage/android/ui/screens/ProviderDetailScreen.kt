@@ -67,6 +67,8 @@ import com.opentokenusage.android.domain.model.ProviderId
 import com.opentokenusage.android.domain.model.ProviderSnapshot
 import com.opentokenusage.android.domain.model.UsageDisplayMode
 import com.opentokenusage.android.domain.model.UsageHistoryEntry
+import com.opentokenusage.android.ui.components.FetchErrorBanner
+import com.opentokenusage.android.ui.components.ServiceOutageBadge
 import com.opentokenusage.android.ui.components.UsageProgressBar
 import com.opentokenusage.android.ui.components.UsageSparklineChart
 import com.opentokenusage.android.ui.theme.LocalOtuColors
@@ -177,19 +179,63 @@ fun ProviderDetailScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (!snapshot.errorMessage.isNullOrBlank()) {
+            val outageStatus = snapshot.serviceStatus?.takeIf { it.isOutage }
+            if (outageStatus != null) {
                 Surface(
+                    modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(8.dp),
                     color = colors.warningBg,
                     border = BorderStroke(1.dp, colors.warningBorder),
                 ) {
-                    Text(
-                        text = snapshot.errorMessage,
-                        color = colors.paceRed,
-                        fontSize = 12.sp,
+                    Column(
                         modifier = Modifier.padding(12.dp),
-                    )
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            ServiceOutageBadge()
+                            val statusUrl = provider?.statusPageUrl
+                            if (!statusUrl.isNullOrBlank()) {
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .clickable { runCatching { uriHandler.openUri(statusUrl) } }
+                                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                ) {
+                                    Text(
+                                        text = "ステータスページ",
+                                        color = colors.accent,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                    )
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Outlined.OpenInNew,
+                                        contentDescription = null,
+                                        tint = colors.accent,
+                                        modifier = Modifier.size(12.dp),
+                                    )
+                                }
+                            }
+                        }
+                        if (outageStatus.description.isNotBlank()) {
+                            Text(
+                                text = outageStatus.description,
+                                color = colors.textPrimary,
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp,
+                            )
+                        }
+                    }
                 }
+            }
+
+            if (!snapshot.errorMessage.isNullOrBlank()) {
+                FetchErrorBanner(snapshot = snapshot)
             }
 
             Surface(

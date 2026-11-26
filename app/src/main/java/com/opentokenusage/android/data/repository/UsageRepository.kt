@@ -5,6 +5,7 @@ import androidx.glance.appwidget.updateAll
 import com.opentokenusage.android.data.auth.AntigravityOAuthSettingsStore
 import com.opentokenusage.android.data.network.ProviderHttpSupport
 import com.opentokenusage.android.data.network.ProviderProbeException
+import com.opentokenusage.android.data.network.ProviderStatusClient
 import com.opentokenusage.android.data.network.clients.ProviderClientRegistry
 import com.opentokenusage.android.data.network.doubleOrNull
 import com.opentokenusage.android.data.network.objOrNull
@@ -21,6 +22,7 @@ import com.opentokenusage.android.domain.model.ConfiguredAccount
 import com.opentokenusage.android.domain.model.MetricLine
 import com.opentokenusage.android.domain.model.MiniMaxRegion
 import com.opentokenusage.android.domain.model.ProviderId
+import com.opentokenusage.android.domain.model.ProviderServiceStatus
 import com.opentokenusage.android.domain.model.ProviderSnapshot
 import com.opentokenusage.android.domain.model.UsageHistoryEntry
 import com.opentokenusage.android.tile.UsageQuickSettingsTileService
@@ -60,6 +62,7 @@ class UsageRepository(
     private val gateStore: RateLimitGateStore,
     private val clientRegistry: ProviderClientRegistry,
     private val notificationHelper: NotificationHelper,
+    private val statusClient: ProviderStatusClient = ProviderStatusClient(httpClient),
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val perAccountLocks = ConcurrentHashMap<String, Mutex>()
@@ -88,6 +91,9 @@ class UsageRepository(
     private val _lastSyncMs = MutableStateFlow<Long?>(null)
     val lastSyncMs: StateFlow<Long?> = _lastSyncMs.asStateFlow()
 
+    private val _serviceStatuses = MutableStateFlow<Map<String, ProviderServiceStatus>>(emptyMap())
+    val serviceStatuses: StateFlow<Map<String, ProviderServiceStatus>> = _serviceStatuses.asStateFlow()
+
     suspend fun initialize() {
         if (initialized) return
         initMutex.withLock {
@@ -104,6 +110,9 @@ class UsageRepository(
             _settings.value = stores.loadSettings()
             _history.value = stores.loadHistory()
             _fxRates.value = stores.loadFxCache().rates
+            _serviceStatuses.value = _snapshots.value.values
+                .mapNotNull { snap -> snap.serviceStatus?.let { snap.providerId to it } }
+                .toMap()
             _lastSyncMs.value = _snapshots.value.values.maxOfOrNull { it.fetchedAtMs }
             if (removedDesktopAccounts.isNotEmpty() || removedSnapshotIds.isNotEmpty()) {
                 stores.saveAccounts(_accounts.value)
@@ -339,10 +348,14 @@ class UsageRepository(
             val gate = gateStore.checkGate(accountId, account.providerId, isManual, now)
             if (gate is GateDecision.Blocked) {
                 if (gate.isHardRateLimit && isManual) {
+                    val status = refreshProviderStatus(account.providerId)
                     markErrorStale(
-                        account,
-                        "レート制限中（あと${UsageDisplayFormatter.formatDurationJa(gate.waitMs)}待機）",
-                        now,
+                        account = account,
+                        errorMsg = "レート制限中（あと${UsageDisplayFormatter.formatDurationJa(gate.waitMs)}待機）",
+                        nowMs = now,
+                        errorIsAuth = false,
+                        errorStatusCode = 429,
+                        serviceStatus = status,
                     )
                 }
                 return@withLock true
@@ -350,32 +363,64 @@ class UsageRepository(
 
             val secret = secretsStore.getSecret(accountId) ?: AccountSecret()
             gateStore.recordAttempt(accountId, now)
-            try {
-                val res = clientRegistry.clientFor(account.providerId).probe(account, secret, now)
-                res.updatedSecret?.let { secretsStore.saveSecret(accountId, it) }
-                gateStore.recordSuccess(accountId, now)
-                applyProbeResult(account, res, now)
-                updateWidgets()
-                true
-            } catch (e: ProviderProbeException) {
-                if (e.statusCode == 429 && e.retryAfterMs != null) {
-                    gateStore.recordRateLimit(accountId, e.retryAfterMs, now)
+            coroutineScope {
+                val statusDeferred = async { refreshProviderStatus(account.providerId) }
+                try {
+                    val res = clientRegistry.clientFor(account.providerId).probe(account, secret, now)
+                    val serviceStatus = statusDeferred.await()
+                    res.updatedSecret?.let { secretsStore.saveSecret(accountId, it) }
+                    gateStore.recordSuccess(accountId, now)
+                    applyProbeResult(account, res, now, serviceStatus)
+                    updateWidgets()
+                    true
+                } catch (e: ProviderProbeException) {
+                    val serviceStatus = statusDeferred.await()
+                    if (e.statusCode == 429 && e.retryAfterMs != null) {
+                        gateStore.recordRateLimit(accountId, e.retryAfterMs, now)
+                    }
+                    markErrorStale(
+                        account = account,
+                        errorMsg = e.message,
+                        nowMs = now,
+                        errorIsAuth = e.isAuthError,
+                        errorStatusCode = e.statusCode,
+                        serviceStatus = serviceStatus,
+                    )
+                    updateWidgets()
+                    false
+                } catch (e: Exception) {
+                    val serviceStatus = statusDeferred.await()
+                    markErrorStale(
+                        account = account,
+                        errorMsg = e.message ?: "取得エラー",
+                        nowMs = now,
+                        errorIsAuth = false,
+                        errorStatusCode = null,
+                        serviceStatus = serviceStatus,
+                    )
+                    updateWidgets()
+                    false
                 }
-                markErrorStale(account, e.message, now)
-                updateWidgets()
-                false
-            } catch (e: Exception) {
-                markErrorStale(account, e.message ?: "取得エラー", now)
-                updateWidgets()
-                false
             }
         }
+    }
+
+    private suspend fun refreshProviderStatus(providerId: String): ProviderServiceStatus? {
+        val fetched = runCatching { statusClient.fetchStatus(providerId) }.getOrNull()
+        if (fetched != null) {
+            val updated = _serviceStatuses.value.toMutableMap()
+            updated[providerId] = fetched
+            _serviceStatuses.value = updated
+            return fetched
+        }
+        return _serviceStatuses.value[providerId]
     }
 
     private suspend fun applyProbeResult(
         account: ConfiguredAccount,
         result: com.opentokenusage.android.data.network.clients.ProbeResult,
         nowMs: Long,
+        serviceStatus: ProviderServiceStatus? = _serviceStatuses.value[account.providerId],
     ) {
         val provider = ProviderId.fromId(account.providerId)
         val snap = ProviderSnapshot(
@@ -387,7 +432,10 @@ class UsageRepository(
             lines = result.lines,
             fetchedAtMs = nowMs,
             errorMessage = null,
+            errorIsAuth = false,
+            errorStatusCode = null,
             isStale = false,
+            serviceStatus = serviceStatus,
         )
 
         val currentMap = _snapshots.value.toMutableMap()
@@ -422,13 +470,24 @@ class UsageRepository(
         }
     }
 
-    private suspend fun markErrorStale(account: ConfiguredAccount, errorMsg: String, nowMs: Long) {
+    private suspend fun markErrorStale(
+        account: ConfiguredAccount,
+        errorMsg: String,
+        nowMs: Long,
+        errorIsAuth: Boolean = false,
+        errorStatusCode: Int? = null,
+        serviceStatus: ProviderServiceStatus? = _serviceStatuses.value[account.providerId],
+    ) {
         val currentMap = _snapshots.value.toMutableMap()
         val existing = currentMap[account.id]
         val provider = ProviderId.fromId(account.providerId)
+        val effectiveStatus = serviceStatus ?: existing?.serviceStatus
         currentMap[account.id] = existing?.copy(
             errorMessage = errorMsg,
+            errorIsAuth = errorIsAuth,
+            errorStatusCode = errorStatusCode,
             isStale = existing.lines.isNotEmpty(),
+            serviceStatus = effectiveStatus,
         ) ?: ProviderSnapshot(
             accountId = account.id,
             providerId = account.providerId,
@@ -437,7 +496,10 @@ class UsageRepository(
             lines = emptyList(),
             fetchedAtMs = nowMs,
             errorMessage = errorMsg,
+            errorIsAuth = errorIsAuth,
+            errorStatusCode = errorStatusCode,
             isStale = false,
+            serviceStatus = effectiveStatus,
         )
         _snapshots.value = currentMap
         stores.saveSnapshots(currentMap)
@@ -469,15 +531,27 @@ class UsageRepository(
     fun orderedDisplaySnapshots(): List<ProviderSnapshot> {
         val accountsList = _accounts.value.sortedBy { it.sortOrder }.filter { it.enabled }
         val snapMap = _snapshots.value
+        val statusMap = _serviceStatuses.value
         return accountsList.map { account ->
             val provider = ProviderId.fromId(account.providerId)
-            snapMap[account.id] ?: ProviderSnapshot(
-                accountId = account.id,
-                providerId = account.providerId,
-                displayName = provider?.displayName ?: account.providerId,
-                accountLabel = account.label,
-                fetchedAtMs = 0L,
-            )
+            val liveStatus = statusMap[account.providerId]
+            val existing = snapMap[account.id]
+            if (existing != null) {
+                if (liveStatus != null && liveStatus != existing.serviceStatus) {
+                    existing.copy(serviceStatus = liveStatus)
+                } else {
+                    existing
+                }
+            } else {
+                ProviderSnapshot(
+                    accountId = account.id,
+                    providerId = account.providerId,
+                    displayName = provider?.displayName ?: account.providerId,
+                    accountLabel = account.label,
+                    fetchedAtMs = 0L,
+                    serviceStatus = liveStatus,
+                )
+            }
         }
     }
 

@@ -172,7 +172,8 @@ internal fun formatStatusPreviewText(
         entry.weekly?.let { add(UsageDisplayFormatter.formatPercentShort(it.used, it.limit, displayMode)) }
         entry.monthly?.let { add(formatMonthlyStatusText(it, displayMode)) }
     }
-    "${entry.snapshot.displayName} ${parts.joinToString(" / ")}"
+    val outageMark = if (entry.snapshot.serviceStatus?.isOutage == true) "⚠障害 " else ""
+    "${outageMark}${entry.snapshot.displayName} ${parts.joinToString(" / ")}"
 }
 
 /**

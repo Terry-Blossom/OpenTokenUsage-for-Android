@@ -60,6 +60,7 @@ class MainActivity : ComponentActivity() {
             val fxRates by repo.fxRates.collectAsStateWithLifecycle()
             val isRefreshing by repo.isRefreshing.collectAsStateWithLifecycle()
             val lastSyncMs by repo.lastSyncMs.collectAsStateWithLifecycle()
+            val serviceStatuses by repo.serviceStatuses.collectAsStateWithLifecycle()
 
             LaunchedEffect(Unit) {
                 repo.initialize()
@@ -74,7 +75,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            val displaySnapshots = remember(accounts, snapshots) { repo.orderedDisplaySnapshots() }
+            val displaySnapshots = remember(accounts, snapshots, serviceStatuses) { repo.orderedDisplaySnapshots() }
 
             OpenTokenUsageTheme(settings.themeMode) {
                 val colors = LocalOtuColors.current
