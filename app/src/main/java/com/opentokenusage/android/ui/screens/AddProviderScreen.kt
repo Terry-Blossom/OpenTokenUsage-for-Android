@@ -161,6 +161,7 @@ fun AddProviderScreen(
                                         p == ProviderId.KIMI_API -> "Moonshot API キー（従量課金残高）"
                                         p == ProviderId.KILO || p == ProviderId.CODEBUFF -> "API キー / CLI 認証 JSON"
                                         p == ProviderId.CURSOR || p == ProviderId.GROK -> "crsr_ APIキー / トークン"
+                                        p.authMode == ProviderAuthMode.NONE -> "認証不要（LAN URL 指定）"
                                         p.authMode == ProviderAuthMode.API_KEY -> "APIキーで接続"
                                         p.authMode == ProviderAuthMode.OAUTH_OR_JSON -> "OAuthトークン / 認証JSON"
                                         else -> "Access Token / Session Cookie"
@@ -489,6 +490,7 @@ private fun ProviderCredentialForm(
                         Text(
                             when (provider) {
                                 ProviderId.CUSTOM_BALANCE -> "ベース URL（例: https://api.example.com）"
+                                ProviderId.OLLAMA -> "Ollama サーバー URL"
                                 else -> "ホスト名"
                             },
                         )
@@ -497,6 +499,7 @@ private fun ProviderCredentialForm(
                         Text(
                             when (provider) {
                                 ProviderId.CUSTOM_BALANCE -> "https://relay.example.com（末尾 /v1 は自動除去）"
+                                ProviderId.OLLAMA -> "http://192.168.1.100:11434"
                                 else -> "github.com"
                             },
                         )
@@ -595,7 +598,7 @@ private fun ProviderCredentialForm(
                 }
             }
 
-            if (showManualInputs) {
+            if (showManualInputs && provider.authMode != ProviderAuthMode.NONE) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -707,6 +710,12 @@ private fun ProviderCredentialForm(
                         scope.launch {
                             errorMsg = null
                             val trimmedHost = customHost.trim()
+                            if (provider == ProviderId.OLLAMA) {
+                                if (trimmedHost.isEmpty()) {
+                                    errorMsg = "Ollama サーバー URL を入力してください（例: http://192.168.1.100:11434）"
+                                    return@launch
+                                }
+                            }
                             if (provider == ProviderId.CUSTOM_BALANCE) {
                                 if (!trimmedHost.startsWith("http://", ignoreCase = true) &&
                                     !trimmedHost.startsWith("https://", ignoreCase = true)
@@ -719,11 +728,21 @@ private fun ProviderCredentialForm(
                                     return@launch
                                 }
                             }
-                            if (primaryInput.isBlank() &&
+                            if (provider.authMode != ProviderAuthMode.NONE &&
+                                primaryInput.isBlank() &&
                                 refreshTokenInput.isBlank()
                             ) {
                                 errorMsg = "APIキーまたは認証トークンを入力してください"
                                 return@launch
+                            }
+
+                            val effectiveHost = if (provider == ProviderId.OLLAMA &&
+                                !trimmedHost.startsWith("http://", ignoreCase = true) &&
+                                !trimmedHost.startsWith("https://", ignoreCase = true)
+                            ) {
+                                "http://$trimmedHost"
+                            } else {
+                                trimmedHost
                             }
 
                             val customConfig = if (provider == ProviderId.CUSTOM_BALANCE) {
@@ -744,22 +763,26 @@ private fun ProviderCredentialForm(
 
                             isSubmitting = true
                             try {
-                                val parsed = CredentialInputParser.parse(
-                                    providerId = provider,
-                                    primaryInput = primaryInput,
-                                    secondaryRefreshToken = refreshTokenInput,
-                                    accountIdOrArn = accountIdOrArn,
-                                    awsRegion = awsRegion,
-                                )
+                                val secretToSave = if (provider.authMode == ProviderAuthMode.NONE) {
+                                    AccountSecret()
+                                } else {
+                                    CredentialInputParser.parse(
+                                        providerId = provider,
+                                        primaryInput = primaryInput,
+                                        secondaryRefreshToken = refreshTokenInput,
+                                        accountIdOrArn = accountIdOrArn,
+                                        awsRegion = awsRegion,
+                                    ).secret
+                                }
                                 if (editingAccount == null) {
-                                    val res = onSave(provider, alias, region, trimmedHost, parsed.secret, true, customConfig)
+                                    val res = onSave(provider, alias, region, effectiveHost, secretToSave, true, customConfig)
                                     if (res.isSuccess) {
                                         onBack()
                                     } else {
                                         errorMsg = res.exceptionOrNull()?.message ?: "接続テストに失敗しました"
                                     }
                                 } else {
-                                    onUpdate(editingAccount.id, alias, region, trimmedHost, parsed.secret, customConfig)
+                                    onUpdate(editingAccount.id, alias, region, effectiveHost, secretToSave, customConfig)
                                     onBack()
                                 }
                             } finally {

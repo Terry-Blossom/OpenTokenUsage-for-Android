@@ -5,6 +5,7 @@ enum class ProviderAuthMode {
     API_KEY,
     OAUTH_OR_JSON,
     SESSION_OR_OAUTH,
+    NONE,
 }
 
 /** Supported AI service providers with direct Android API or OAuth access. */
@@ -195,6 +196,15 @@ enum class ProviderId(
         authMode = ProviderAuthMode.API_KEY,
         keyHelpUrl = "",
         localFileHint = "New API / One API / Sub2API / 独自エンドポイントのベース URL と API キーを入力してください（複数アカウント登録可）。",
+        supportsCustomHost = true,
+    ),
+    OLLAMA(
+        id = "ollama",
+        displayName = "Ollama",
+        brandColorRgb = 0xFF71717A,
+        authMode = ProviderAuthMode.NONE,
+        keyHelpUrl = "https://ollama.com",
+        localFileHint = "同一 LAN 内の Ollama サーバー URL（例: http://192.168.1.100:11434）を入力してください。PC 側で OLLAMA_HOST=0.0.0.0:11434 として ollama serve を起動する必要があります。認証キーは不要です。",
         supportsCustomHost = true,
     );
 

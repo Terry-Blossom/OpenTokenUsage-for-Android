@@ -64,6 +64,7 @@ class ProviderClientRegistry(
         ProviderId.FACTORY.id to FactoryClient(httpClient, overrides),
         ProviderId.KIRO.id to KiroClient(httpClient, overrides),
         ProviderId.CUSTOM_BALANCE.id to CustomBalanceClient(httpClient, overrides),
+        ProviderId.OLLAMA.id to OllamaClient(httpClient, overrides),
         ProviderId.ANTIGRAVITY.id to AntigravityClient(
             httpClient,
             overrides,
