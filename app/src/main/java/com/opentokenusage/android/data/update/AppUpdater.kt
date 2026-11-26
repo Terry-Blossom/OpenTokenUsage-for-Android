@@ -31,6 +31,7 @@ data class AvailableUpdate(
 class AppUpdater(
     private val context: Context,
     private val httpClient: OkHttpClient,
+    private val latestReleaseUrl: String = LATEST_RELEASE_URL,
 ) {
     suspend fun checkForUpdate(): Result<AvailableUpdate?> = withContext(Dispatchers.IO) {
         try {
@@ -55,36 +56,11 @@ class AppUpdater(
         }
     }
 
-    private fun fetchLatest(): AvailableUpdate? {
-        val request = Request.Builder()
-            .url(LATEST_RELEASE_URL)
-            .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", "OpenTokenUsage-Android/${BuildConfig.VERSION_NAME}")
-            .build()
-        httpClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw IOException(httpErrorMessage(response.code))
-            val body = response.body?.string().orEmpty()
-            val release = try {
-                ProviderHttpSupport.json.decodeFromString<GitHubRelease>(body)
-            } catch (e: Exception) {
-                throw IOException("更新情報を解析できませんでした")
-            }
-            val remoteVersion = release.tagName.trim().removePrefix("v").removePrefix("V")
-            if (remoteVersion.isBlank() || !isNewerVersion(remoteVersion, BuildConfig.VERSION_NAME)) {
-                return null
-            }
-            val apk = release.assets.firstOrNull {
-                it.name.endsWith(".apk", ignoreCase = true) && it.browserDownloadUrl.isNotBlank()
-            } ?: throw IOException("リリースに APK が添付されていません")
-
-            return AvailableUpdate(
-                versionName = remoteVersion,
-                notes = release.body.trim(),
-                apkUrl = apk.browserDownloadUrl,
-                apkSizeBytes = apk.size,
-            )
-        }
-    }
+    private fun fetchLatest(): AvailableUpdate? = fetchLatestRelease(
+        httpClient = httpClient,
+        releaseUrl = latestReleaseUrl,
+        currentVersion = BuildConfig.VERSION_NAME,
+    )
 
     private suspend fun fetchApk(update: AvailableUpdate, onProgress: (Float) -> Unit): File {
         val dir = File(context.cacheDir, APK_DIR).apply { mkdirs() }
@@ -169,17 +145,19 @@ class AppUpdater(
         }
     }
 
-    private fun httpErrorMessage(code: Int): String = when (code) {
-        403 -> "GitHub の更新確認回数が上限に達しました。時間をおいて再試行してください"
-        404 -> "GitHub にリリース情報が見つかりません"
-        else -> "GitHub への接続に失敗しました（HTTP $code）"
-    }
+    private fun httpErrorMessage(code: Int): String = githubHttpErrorMessage(code)
 
-    private companion object {
+    internal companion object {
         const val LATEST_RELEASE_URL =
-            "https://api.github.com/repos/otetcham/OpenTokenUsage-for-Android/releases/latest"
-        const val APK_DIR = "updates"
+            "https://api.github.com/repos/Terry-Blossom/OpenTokenUsage-for-Android/releases/latest"
+        private const val APK_DIR = "updates"
     }
+}
+
+private fun githubHttpErrorMessage(code: Int): String = when (code) {
+    403 -> "GitHub の更新確認回数が上限に達しました。時間をおいて再試行してください"
+    404 -> "GitHub にリリース情報が見つかりません"
+    else -> "GitHub への接続に失敗しました（HTTP $code）"
 }
 
 @Serializable
@@ -190,11 +168,60 @@ private data class GitHubRelease(
 )
 
 @Serializable
-private data class GitHubAsset(
+internal data class GitHubAsset(
     val name: String = "",
     @SerialName("browser_download_url") val browserDownloadUrl: String = "",
     val size: Long = 0L,
 )
+
+/**
+ * Selects an installable APK asset from GitHub Release assets:
+ * excludes APKs whose name contains "unsigned", prefers names starting with
+ * "OpenTokenUsage-", and falls back to any remaining .apk asset.
+ */
+internal fun selectReleaseApkAsset(assets: List<GitHubAsset>): GitHubAsset? {
+    val candidates = assets.filter { asset ->
+        asset.name.endsWith(".apk", ignoreCase = true) &&
+            asset.browserDownloadUrl.isNotBlank() &&
+            !asset.name.contains("unsigned", ignoreCase = true)
+    }
+    return candidates.firstOrNull { it.name.startsWith("OpenTokenUsage-") }
+        ?: candidates.firstOrNull()
+}
+
+internal fun fetchLatestRelease(
+    httpClient: OkHttpClient,
+    releaseUrl: String,
+    currentVersion: String,
+): AvailableUpdate? {
+    val request = Request.Builder()
+        .url(releaseUrl)
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "OpenTokenUsage-Android/$currentVersion")
+        .build()
+    httpClient.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) throw IOException(githubHttpErrorMessage(response.code))
+        val body = response.body?.string().orEmpty()
+        val release = try {
+            ProviderHttpSupport.json.decodeFromString<GitHubRelease>(body)
+        } catch (e: Exception) {
+            throw IOException("更新情報を解析できませんでした")
+        }
+        val remoteVersion = release.tagName.trim().removePrefix("v").removePrefix("V")
+        if (remoteVersion.isBlank() || !isNewerVersion(remoteVersion, currentVersion)) {
+            return null
+        }
+        val apk = selectReleaseApkAsset(release.assets)
+            ?: throw IOException("リリースにインストール可能な APK が添付されていません")
+
+        return AvailableUpdate(
+            versionName = remoteVersion,
+            notes = release.body.trim(),
+            apkUrl = apk.browserDownloadUrl,
+            apkSizeBytes = apk.size,
+        )
+    }
+}
 
 /** Compares dotted version numbers such as `v0.1.10` against `0.1.9`. */
 internal fun isNewerVersion(candidate: String, current: String): Boolean {

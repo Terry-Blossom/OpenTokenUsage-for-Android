@@ -1,5 +1,6 @@
 -keep class com.opentokenusage.android.domain.model.** { *; }
 -keep class com.opentokenusage.android.data.storage.** { *; }
+-keep class com.opentokenusage.android.data.update.** { *; }
 -keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod
 -dontwarn kotlinx.serialization.**
 -dontwarn com.google.errorprone.annotations.**
