@@ -293,6 +293,7 @@ class NotificationHelper(private val context: Context) {
             .setShowWhen(false)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
             .setContentIntent(openAppIntent(PERSISTENT_ID))
+            .addAction(R.drawable.ic_widget_refresh, ACTION_REFRESH_NOW_LABEL, refreshNowIntent())
             .build()
 
         runCatching { NotificationManagerCompat.from(context).notify(PERSISTENT_ID, notification) }
@@ -348,6 +349,16 @@ class NotificationHelper(private val context: Context) {
         runCatching { NotificationManagerCompat.from(context).notify(id, notification) }
     }
 
+    private fun refreshNowIntent(): PendingIntent {
+        val intent = NotificationRefreshReceiver.createRefreshIntent(context)
+        return PendingIntent.getBroadcast(
+            context,
+            REFRESH_ACTION_REQUEST_CODE,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
     private fun openAppIntent(requestCode: Int): PendingIntent {
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -371,7 +382,9 @@ class NotificationHelper(private val context: Context) {
     companion object {
         const val CHANNEL_ALERTS = "usage_alerts"
         const val CHANNEL_STATUS = "usage_status"
+        internal const val ACTION_REFRESH_NOW_LABEL = "今すぐ更新"
         private const val PERSISTENT_ID = 1201
+        private const val REFRESH_ACTION_REQUEST_CODE = 1202
     }
 
     private data class StatusSlot(
