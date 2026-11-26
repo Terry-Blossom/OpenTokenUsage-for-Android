@@ -185,8 +185,9 @@ class NotificationStatusLinesTest {
     @Test
     fun formatsMonthlyTextPreviewAndSmallerFontSizes() {
         val monthly = MetricLine.Progress("Monthly", 58.0, 100.0, periodDurationMs = 30L * dayMs, scope = "detail")
-        assertEquals("月 42%", formatMonthlyStatusText(monthly, UsageDisplayMode.LEFT))
-        assertEquals("月 58%", formatMonthlyStatusText(monthly, UsageDisplayMode.USED))
+        assertEquals("42%", formatMonthlyStatusText(monthly, UsageDisplayMode.LEFT))
+        assertEquals("58%", formatMonthlyStatusText(monthly, UsageDisplayMode.USED))
+        assertFalse(formatMonthlyStatusText(monthly, UsageDisplayMode.LEFT).contains("月"))
 
         val snapshot = ProviderSnapshot(
             accountId = "oc1",
@@ -204,7 +205,7 @@ class NotificationStatusLinesTest {
             formatStatusPreviewText(usageStatusEntries(listOf(snapshot), includeMonthly = false), UsageDisplayMode.LEFT),
         )
         assertEquals(
-            "OpenCode Go 86% / 67% / 月 42%",
+            "OpenCode Go 86% / 67% / 42%",
             formatStatusPreviewText(usageStatusEntries(listOf(snapshot), includeMonthly = true), UsageDisplayMode.LEFT),
         )
 

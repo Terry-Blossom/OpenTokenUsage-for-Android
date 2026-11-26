@@ -161,7 +161,7 @@ internal fun statusNotificationLines(
 internal fun formatMonthlyStatusText(
     line: MetricLine.Progress,
     displayMode: UsageDisplayMode,
-): String = "月 ${UsageDisplayFormatter.formatPercentShort(line.used, line.limit, displayMode)}"
+): String = UsageDisplayFormatter.formatPercentShort(line.used, line.limit, displayMode)
 
 internal fun formatStatusPreviewText(
     entries: List<UsageStatusEntry>,
