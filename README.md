@@ -18,6 +18,36 @@ Android companion app and home-screen widgets inspired by [PowerUserZ/OpenTokenU
 - **Optional monthly usage line**: Optionally shows a compact monthly usage line below the weekly percentage in the persistent notification and 1x3 status strip widget for providers with monthly quotas.
 - **Background Refresh**: Periodic updates powered by `WorkManager` with pace calculation (`PaceCalculator`).
 
+## Supported Providers
+
+| Provider | Auth / Setup | Notes |
+| --- | --- | --- |
+| Claude | OAuth token / `~/.claude/.credentials.json` | 5h / 7d quotas, reset credits |
+| Codex | OAuth token / `~/.codex/auth.json` | Session / Weekly / Business monthly |
+| Cursor | `crsr_` API key / access token / session cookie | Plan / API usage / bonus credits |
+| GitHub Copilot | GitHub PAT / `gh auth token` | Custom host supported |
+| Antigravity | Google OAuth login / token JSON | Encrypted OAuth client credentials |
+| OpenRouter | API key | Key limit & account credits |
+| DeepSeek | API key | Wallet balance & status |
+| Z.ai | API key | 5h / 7d / Web search limits |
+| MiniMax | API key | Global / China region selector |
+| Synthetic | API key | 5h / Weekly / Subscription / Search |
+| OpenCode Go | API key | Session / Weekly / Monthly |
+| Amp | API key | Free balance & individual credits |
+| Kimi Code | OAuth token / `kimi-code.json` | 5h / Weekly / Monthly |
+| Kimi API | Moonshot API key (`MOONSHOT_API_KEY`) | Global (`.ai`, `$`) / China (`.cn`, `¥`) auto-detection |
+| Kilo | API key / `auth.json` | Credit blocks & Kilo Pass |
+| Codebuff | API key / `credentials.json` | Credits & weekly limit |
+| Grok | OAuth / `crsr_` API key | Quota / Grok Bot weekly |
+| Muse Code | OAuth token / `auth.json` | Quota limits |
+| Factory / Droid | OAuth token / `auth.json` | Quota limits |
+| Devin | API key / `credentials.toml` | Daily / Weekly / prompt credits |
+| Kiro | OAuth token / `kiro-auth-token.json` | Quota limits |
+| Custom balances | Base URL + API key (encrypted, multiple accounts) | New API / One API (account & API key), Sub2API, custom GET dot-path endpoint |
+| Ollama | LAN server URL (no auth, e.g. `http://192.168.x.x:11434`) | Server version, installed models, loaded models (`OLLAMA_HOST=0.0.0.0:11434`) |
+
+> Note: Desktop-only providers that read local PC files rather than an HTTP API (such as JetBrains AI Assistant's `AIAssistantQuotaManager2.xml` and Qwen Code's local `~/.qwen/usage/*.jsonl` ledger) are not supported on Android.
+
 ## Tech Stack
 
 - Kotlin + Jetpack Compose (Material 3)

@@ -18,6 +18,36 @@
 - **月の使用量表示（オプション）**: 月間利用枠があるプロバイダーについて、通知バー常時表示と 1×3 ステータスウィジェットの週表示の下に月表示を小さく追加できます（設定でオン/オフ、既定オフ）。
 - **バックグラウンド更新**: `WorkManager` による定期更新と、リセット周期に対する消費ペース計算（`PaceCalculator`）に対応しています。
 
+## 対応プロバイダー
+
+| プロバイダー | 認証・接続方式 | 備考 |
+| --- | --- | --- |
+| Claude | OAuth トークン / `~/.claude/.credentials.json` | 5時間枠 / 週間枠・リセット回数 |
+| Codex | OAuth トークン / `~/.codex/auth.json` | セッション / 週間 / Business 月間上限 |
+| Cursor | `crsr_` API キー / Access Token / Session Cookie | Plan / API usage / ボーナス残高 |
+| GitHub Copilot | GitHub PAT / `gh auth token` | カスタムホスト対応 |
+| Antigravity | Google ログイン / OAuth トークン JSON | OAuth クライアント情報を端末内暗号化保存 |
+| OpenRouter | API キー | API キー上限・クレジット残高 |
+| DeepSeek | API キー | 残高・ステータス |
+| Z.ai | API キー | 5時間枠 / 週間枠 / Web 検索枠 |
+| MiniMax | API キー | Global / China リージョン切替対応 |
+| Synthetic | API キー | 5時間枠 / 週間 / サブスク / 検索 |
+| OpenCode Go | API キー | Session / Weekly / Monthly |
+| Amp | API キー | Amp Free 残高・個別クレジット |
+| Kimi Code | OAuth トークン / `kimi-code.json` | 5時間枠 / 週間 / 月間合計 |
+| Kimi API | Moonshot API キー (`MOONSHOT_API_KEY`) | グローバル (`.ai`, `$`) / 中国 (`.cn`, `¥`) 自動判定 |
+| Kilo | API キー / `auth.json` | クレジットブロック・Kilo Pass |
+| Codebuff | API キー / `credentials.json` | クレジット残量・週間リミット |
+| Grok | OAuth / `crsr_` API キー | クォータ / Grok Bot 週間枠 |
+| Muse Code | OAuth トークン / `auth.json` | クォータ枠 |
+| Factory / Droid | OAuth トークン / `auth.json` | クォータ枠 |
+| Devin | API キー / `credentials.toml` | 日次 / 週間 / プロンプトクレジット |
+| Kiro | OAuth トークン / `kiro-auth-token.json` | クォータ枠 |
+| Custom balances | ベース URL + API キー（暗号化保存・複数登録可） | New API / One API（アカウント・API キー）、Sub2API、独自 GET ドットパス |
+| Ollama | LAN サーバー URL（認証不要、例 `http://192.168.x.x:11434`） | バージョン・インストール済みモデル・読み込み中モデル（`OLLAMA_HOST=0.0.0.0:11434`） |
+
+> 補足: PC 上のローカルファイルに依存し HTTP API を持たないプロバイダー（JetBrains AI Assistant の `AIAssistantQuotaManager2.xml`、Qwen Code の `~/.qwen/usage/*.jsonl` ローカル台帳など）は Android 版では非対応です。
+
 ## 技術スタック
 
 - Kotlin + Jetpack Compose (Material 3)
