@@ -25,6 +25,7 @@ import com.opentokenusage.android.domain.model.ProviderSnapshot
 import com.opentokenusage.android.domain.model.UsageHistoryEntry
 import com.opentokenusage.android.tile.UsageQuickSettingsTileService
 import com.opentokenusage.android.util.NotificationHelper
+import com.opentokenusage.android.widget.UsageMiniWidget
 import com.opentokenusage.android.widget.UsageOverviewWidget
 import com.opentokenusage.android.widget.UsageSingleWidget
 import com.opentokenusage.android.widget.UsageStatusStripWidget
@@ -482,6 +483,7 @@ class UsageRepository(
         runCatching { UsageOverviewWidget().updateAll(context.applicationContext) }
         runCatching { UsageSingleWidget().updateAll(context.applicationContext) }
         runCatching { UsageStatusStripWidget().updateAll(context.applicationContext) }
+        runCatching { UsageMiniWidget().updateAll(context.applicationContext) }
         runCatching {
             notificationHelper.updatePersistentNotification(orderedDisplaySnapshots(), _settings.value)
         }

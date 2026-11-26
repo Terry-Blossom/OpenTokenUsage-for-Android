@@ -76,6 +76,7 @@ import com.opentokenusage.android.domain.model.ResetTimerMode
 import com.opentokenusage.android.domain.model.UsageDisplayMode
 import com.opentokenusage.android.ui.theme.LocalOtuColors
 import com.opentokenusage.android.ui.theme.ProviderVisuals
+import com.opentokenusage.android.widget.UsageMiniWidgetReceiver
 import com.opentokenusage.android.widget.UsageOverviewWidgetReceiver
 import com.opentokenusage.android.widget.UsageSingleWidgetReceiver
 import com.opentokenusage.android.widget.UsageStatusStripWidgetReceiver
@@ -202,7 +203,7 @@ fun SettingsScreen(
         ) {
             SettingsSection("ホーム画面ウィジェット") {
                 Text(
-                    text = "一覧（複数アカウント）、個別（2x1コンパクト）、通知バー風（1x3）をホーム画面に設置できます。",
+                    text = "一覧（複数アカウント）、個別（2x1）、ミニ（1x1）、通知バー風（1x3）をホーム画面に設置できます。",
                     color = colors.textSecondary,
                     fontSize = 12.sp,
                 )
@@ -231,15 +232,30 @@ fun SettingsScreen(
                         Text("個別を追加", fontSize = 12.sp)
                     }
                 }
-                OutlinedButton(
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, colors.border),
-                    onClick = { requestPin(UsageStatusStripWidgetReceiver::class.java) },
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Icon(Icons.Outlined.Widgets, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(5.dp))
-                    Text("通知バー風（1x3）を追加", fontSize = 12.sp)
+                    OutlinedButton(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, colors.border),
+                        onClick = { requestPin(UsageMiniWidgetReceiver::class.java) },
+                    ) {
+                        Icon(Icons.Outlined.Widgets, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(5.dp))
+                        Text("ミニ（1x1）を追加", fontSize = 12.sp)
+                    }
+                    OutlinedButton(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, colors.border),
+                        onClick = { requestPin(UsageStatusStripWidgetReceiver::class.java) },
+                    ) {
+                        Icon(Icons.Outlined.Widgets, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(5.dp))
+                        Text("通知バー風（1x3）", fontSize = 12.sp)
+                    }
                 }
                 if (widgetPinMessage != null) {
                     Text(widgetPinMessage!!, color = colors.textMuted, fontSize = 11.sp)
